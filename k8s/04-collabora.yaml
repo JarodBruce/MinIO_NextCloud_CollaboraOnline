@@ -9,7 +9,7 @@ data:
   domain: "nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
   username: "admin"
   password: "admin123"
-  extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:logging.level=warning"
 
 ---
 # Collabora Online Deployment
@@ -30,6 +30,10 @@ spec:
       labels:
         app: collabora
     spec:
+      # ボリュームをマウントしてのファイルシステム問題を解決
+      volumes:
+      - name: cool-tmp
+        emptyDir: {}
       containers:
       - name: collabora
         image: collabora/code:latest
@@ -59,10 +63,14 @@ spec:
         ports:
         - containerPort: 9980
           name: http
+        # 一時ディレクトリをマウント
+        volumeMounts:
+        - name: cool-tmp
+          mountPath: /opt/cool
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "2Gi"
+            cpu: "1000m"
           limits:
             memory: "4Gi"
             cpu: "2000m"
@@ -81,9 +89,11 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
         securityContext:
+          runAsUser: 0
           capabilities:
             add:
             - MKNOD
+            - SYS_CHROOT
 
 ---
 # Collabora Online Service
