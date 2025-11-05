@@ -9,7 +9,7 @@ data:
   domain: "nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
   username: "admin"
   password: "admin123"
-  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:logging.level=warning"
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
 
 ---
 # Collabora Online Deployment
@@ -30,10 +30,16 @@ spec:
       labels:
         app: collabora
     spec:
-      # ボリュームをマウントしてのファイルシステム問題を解決
+      # セキュリティコンテキストを追加
+      securityContext:
+        fsGroup: 101  # cool グループ
+        runAsNonRoot: true
+        runAsUser: 101  # cool ユーザー
+      
       volumes:
       - name: cool-tmp
         emptyDir: {}
+      
       containers:
       - name: collabora
         image: collabora/code:latest
@@ -60,13 +66,15 @@ spec:
               key: extra_params
         - name: dictionaries
           value: "en_US ja"
+        
         ports:
         - containerPort: 9980
           name: http
-        # 一時ディレクトリをマウント
+        
         volumeMounts:
         - name: cool-tmp
           mountPath: /opt/cool
+        
         resources:
           requests:
             memory: "2Gi"
@@ -74,6 +82,7 @@ spec:
           limits:
             memory: "4Gi"
             cpu: "2000m"
+        
         livenessProbe:
           httpGet:
             path: /
@@ -81,6 +90,7 @@ spec:
           initialDelaySeconds: 60
           periodSeconds: 30
           timeoutSeconds: 10
+        
         readinessProbe:
           httpGet:
             path: /
@@ -88,12 +98,17 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
+        
+        # securityContext を Pod レベルに移動し、コンテナレベルでは削除
         securityContext:
-          runAsUser: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
           capabilities:
             add:
             - MKNOD
             - SYS_CHROOT
+            drop:
+            - ALL
 
 ---
 # Collabora Online Service
