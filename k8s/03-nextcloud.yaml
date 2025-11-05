@@ -1,0 +1,301 @@
+---
+# NextCloud PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-pvc
+  namespace: cloud-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+  storageClassName: local-path
+
+---
+# NextCloud Database PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-db-pvc
+  namespace: cloud-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-path
+
+---
+# NextCloud Database Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nextcloud-db-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  postgres-password: "nextcloud_db_password"
+  postgres-user: "nextcloud"
+  postgres-db: "nextcloud"
+
+---
+# NextCloud Admin Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nextcloud-admin-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  nextcloud-username: "admin"
+  nextcloud-password: "admin123"
+
+---
+# PostgreSQL Deployment for NextCloud
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud-db
+  namespace: cloud-storage
+  labels:
+    app: nextcloud-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud-db
+  template:
+    metadata:
+      labels:
+        app: nextcloud-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-db
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-password
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: db-data
+        persistentVolumeClaim:
+          claimName: nextcloud-db-pvc
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextcloud-db
+  namespace: cloud-storage
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: nextcloud-db
+
+---
+# NextCloud ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nextcloud-config
+  namespace: cloud-storage
+data:
+  POSTGRES_HOST: "nextcloud-db"
+  POSTGRES_DB: "nextcloud"
+  NEXTCLOUD_TRUSTED_DOMAINS: "nextcloud.local localhost"
+  OBJECTSTORE_S3_BUCKET: "nextcloud"
+  OBJECTSTORE_S3_REGION: "us-east-1"
+  OBJECTSTORE_S3_HOST: "minio.cloud-storage.svc.cluster.local"
+  OBJECTSTORE_S3_PORT: "9000"
+  OBJECTSTORE_S3_SSL: "false"
+  OBJECTSTORE_S3_USEPATH_STYLE: "true"
+
+---
+# NextCloud Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud
+  namespace: cloud-storage
+  labels:
+    app: nextcloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nextcloud
+  template:
+    metadata:
+      labels:
+        app: nextcloud
+    spec:
+      initContainers:
+      - name: wait-for-db
+        image: busybox:latest
+        command: ['sh', '-c', 'until nc -z nextcloud-db 5432; do echo waiting for db; sleep 2; done;']
+      containers:
+      - name: nextcloud
+        image: nextcloud:latest
+        env:
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-db
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-db-secret
+              key: postgres-password
+        - name: NEXTCLOUD_ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-admin-secret
+              key: nextcloud-username
+        - name: NEXTCLOUD_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: nextcloud-admin-secret
+              key: nextcloud-password
+        - name: NEXTCLOUD_TRUSTED_DOMAINS
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_TRUSTED_DOMAINS
+        - name: OBJECTSTORE_S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_BUCKET
+        - name: OBJECTSTORE_S3_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_REGION
+        - name: OBJECTSTORE_S3_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_HOST
+        - name: OBJECTSTORE_S3_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_PORT
+        - name: OBJECTSTORE_S3_SSL
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_SSL
+        - name: OBJECTSTORE_S3_USEPATH_STYLE
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_USEPATH_STYLE
+        - name: OBJECTSTORE_S3_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: rootUser
+        - name: OBJECTSTORE_S3_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: minio-secret
+              key: rootPassword
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: nextcloud-data
+          mountPath: /var/www/html
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /status.php
+            port: 80
+            httpHeaders:
+            - name: Host
+              value: localhost
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /status.php
+            port: 80
+            httpHeaders:
+            - name: Host
+              value: localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: nextcloud-data
+        persistentVolumeClaim:
+          claimName: nextcloud-pvc
+
+---
+# NextCloud Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextcloud
+  namespace: cloud-storage
+  labels:
+    app: nextcloud
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  selector:
+    app: nextcloud

@@ -1,0 +1,22 @@
+.git/
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# セキュリティ: 実際のTailscale Auth Keyを含むファイルは除外
+k8s/06-tailscale-custom.yaml
+
+# バックアップファイル
+*.backup
+*.bak
+backup/
+
+# ログファイル
+*.log
+
+# 一時ファイル
+tmp/
+temp/

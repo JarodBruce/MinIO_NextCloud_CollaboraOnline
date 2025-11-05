@@ -1,0 +1,104 @@
+---
+# Collabora Online ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collabora-config
+  namespace: cloud-storage
+data:
+  domain: "nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
+  username: "admin"
+  password: "admin123"
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
+
+---
+# Collabora Online Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collabora
+  namespace: cloud-storage
+  labels:
+    app: collabora
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: collabora
+  template:
+    metadata:
+      labels:
+        app: collabora
+    spec:
+      containers:
+      - name: collabora
+        image: collabora/code:latest
+        env:
+        - name: domain
+          valueFrom:
+            configMapKeyRef:
+              name: collabora-config
+              key: domain
+        - name: username
+          valueFrom:
+            configMapKeyRef:
+              name: collabora-config
+              key: username
+        - name: password
+          valueFrom:
+            configMapKeyRef:
+              name: collabora-config
+              key: password
+        - name: extra_params
+          valueFrom:
+            configMapKeyRef:
+              name: collabora-config
+              key: extra_params
+        - name: dictionaries
+          value: "en_US ja"
+        ports:
+        - containerPort: 9980
+          name: http
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 9980
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 9980
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        securityContext:
+          capabilities:
+            add:
+            - MKNOD
+
+---
+# Collabora Online Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: collabora
+  namespace: cloud-storage
+  labels:
+    app: collabora
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9980
+    targetPort: 9980
+    name: http
+  selector:
+    app: collabora
