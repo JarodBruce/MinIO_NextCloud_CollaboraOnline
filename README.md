@@ -1,7 +1,6 @@
-# k3s クラウドストレージ環境
-# MinIO + NextCloud + Collabora Online + Cloudflare Tunnel
+# MinIO + NextCloud + Collabora Online on k3s with Cloudflare Tunnel
 
-このプロジェクトは、k3s上にMinIO、NextCloud、Collabora Onlineを構築し、Cloudflare Tunnel経由で安全にアクセスできるクラウドストレージ環境を提供します。
+Cloudflare Tunnelを使用してk3s上にセキュアなクラウドストレージ環境を構築します。VPNやポート開放不要で、世界中どこからでも安全にアクセスできます。
 
 ## 📋 目次
 
@@ -9,606 +8,1261 @@
 - [アーキテクチャ](#アーキテクチャ)
 - [前提条件](#前提条件)
 - [クイックスタート](#クイックスタート)
-- [詳細なセットアップ手順](#詳細なセットアップ手順)
+- [Cloudflare Tunnelのセットアップ](#cloudflare-tunnelのセットアップ)
 - [各サービスの設定](#各サービスの設定)
+- [運用とメンテナンス](#運用とメンテナンス)
 - [トラブルシューティング](#トラブルシューティング)
 - [アンインストール](#アンインストール)
 
 ## 🎯 概要
 
-このプロジェクトは以下のコンポーネントで構成されています：
+このプロジェクトは、以下のコンポーネントで構成される完全なクラウドストレージソリューションです：
 
-- **MinIO**: S3互換のオブジェクトストレージ（NextCloudのバックエンドストレージ）
-- **NextCloud**: ファイル共有・同期プラットフォーム
-- **Collabora Online**: オンラインオフィススイート（NextCloudと統合）
-- **Cloudflare Tunnel**: ゼロトラストネットワークアクセス（外部からの安全なアクセス）
-- **PostgreSQL**: NextCloudのデータベース
+- **MinIO** - S3互換オブジェクトストレージ（NextCloudのバックエンド）
+- **NextCloud** - Webベースのファイル共有・同期プラットフォーム
+- **Collabora Online** - オンラインOfficeスイート（Word/Excel/PowerPoint編集）
+- **PostgreSQL** - NextCloudデータベース
+- **Cloudflare Tunnel** - セキュアな外部アクセス（ゼロトラストアーキテクチャ）
 
 ## 🏗️ アーキテクチャ
 
 ```
-Internet
-   |
-   | (Cloudflare Network)
-   |
-   v
-Cloudflare Tunnel (cloudflared)
-   |
-   |-- nextcloud.yourdomain.com --> NextCloud (80) --> PostgreSQL (5432)
-   |                                             \
-   |                                              \--> MinIO (9000)
-   |
-   |-- collabora.yourdomain.com --> Collabora Online (9980)
-   |
-   \-- minio.yourdomain.com --> MinIO Console (9001)
+                                   Internet
+                                      |
+                        ┌─────────────┴─────────────┐
+                        │   Cloudflare Network     │
+                        │  (DDoS Protection, WAF)   │
+                        └─────────────┬─────────────┘
+                                      |
+                        ┌─────────────┴─────────────┐
+                        │  Cloudflare Tunnel        │
+                        │    (cloudflared)          │
+                        └─────────────┬─────────────┘
+                                      |
+                    ┌─────────────────┼─────────────────┐
+                    |                 |                 |
+        nextcloud.example.com  collabora.example.com  minio.example.com
+                    |                 |                 |
+            ┌───────▼────────┐  ┌────▼─────┐  ┌───────▼────────┐
+            │   NextCloud    │  │Collabora │  │ MinIO Console  │
+            │   Service      │  │  Online  │  │   (9001)       │
+            │   (Port 80)    │  │  (9980)  │  └────────────────┘
+            └───────┬────────┘  └──────────┘
+                    |
+        ┌───────────┴────────────┐
+        |                        |
+   ┌────▼──────┐          ┌─────▼────┐
+   │PostgreSQL │          │  MinIO   │
+   │  Database │          │ Storage  │
+   │  (5432)   │          │  (9000)  │
+   └───────────┘          └──────────┘
+
+全て cloud-storage namespace で実行
 ```
 
-**特徴:**
-- Cloudflare Tunnelが外部公開のエントリーポイント
-- 自動SSL/TLS証明書管理
-- DDoS保護とWAF（Cloudflareが提供）
-- IP制限やアクセスポリシーの設定が可能
-- VPN不要で安全にアクセス可能
+**主な特徴:**
 
-全てのサービスは同じ `cloud-storage` ネームスペースにデプロイされます。
+✅ **ゼロトラストセキュリティ** - ファイアウォール設定やポート開放不要  
+✅ **自動SSL/TLS** - 証明書の取得・更新を自動管理  
+✅ **DDoS保護** - Cloudflareの強力なDDoS対策  
+✅ **グローバルCDN** - 世界中のエッジサーバーで高速アクセス  
+✅ **アクセス制御** - IP制限、Email認証、MFAなど柔軟な認証  
+✅ **簡単デプロイ** - スクリプト一発でk3s環境を構築
 
 ## 📦 前提条件
 
-### 必須要件
+### システム要件
 
-- **k3s**: Kubernetes軽量ディストリビューション
-  - 最小メモリ: 4GB RAM
-  - 推奨メモリ: 8GB RAM以上
-  - ストレージ: 100GB以上の空き容量
+| 項目 | 最小スペック | 推奨スペック |
+|------|-------------|-------------|
+| CPU | 2コア | 4コア以上 |
+| メモリ | 4GB RAM | 8GB RAM以上 |
+| ストレージ | 50GB | 100GB以上 |
+| OS | Linux (Ubuntu/Debian/CentOS等) | Ubuntu 22.04 LTS |
 
-- **kubectl**: Kubernetesコマンドラインツール
-  - k3sインストール時に自動的に利用可能
+### 必要なもの
 
-- **Cloudflareアカウント**: 
-  - https://cloudflare.com でアカウント作成（無料プランで利用可能）
-  - ドメインをCloudflareに登録
-  - Zero Trustアカウントのセットアップ
+1. **Cloudflareアカウント** (無料プランでOK)
+   - https://cloudflare.com でアカウント作成
+   - ドメインをCloudflareに登録（必須）
+   - Zero Trustダッシュボードへのアクセス
 
-### 必須
+2. **独自ドメイン**
+   - Cloudflareで管理するドメイン
+   - 例: `example.com`, `mydomain.net` など
 
-- **カスタムドメイン**: Cloudflareに登録したドメイン（必須）
+3. **サーバー環境**
+   - Linux サーバー（物理/VM/クラウド）
+   - Root権限またはsudo権限
+   - インターネット接続
+
+### 事前にインストールされるもの
+
+以下はデプロイスクリプトが自動でインストールします：
+
+- **k3s** - 軽量Kubernetes
+- **kubectl** - Kubernetesコマンドラインツール
+- 必要なDockerイメージ（MinIO、NextCloud、Collabora、PostgreSQL、cloudflared）
 
 ## 🚀 クイックスタート
 
-### 1. リポジトリのクローン
+### ステップ1: リポジトリのクローン
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline.git
 cd MinIO_NextCloud_CollaboraOnline
 ```
 
-### 2. Cloudflare Tunnelの設定
+### ステップ2: Cloudflare Tunnelの作成
 
-Cloudflareダッシュボードでトンネルを作成し、トークンを取得します。
-詳細な手順は `docs/CLOUDFLARE_TUNNEL_SETUP.md` を参照してください。
+1. **Cloudflareダッシュボードにログイン**
+   ```bash
+   # ブラウザで以下のURLを開く
+   https://one.dash.cloudflare.com/
+   ```
+
+2. **トンネルを作成**
+   - `Zero Trust` > `Networks` > `Tunnels` に移動
+   - `Create a tunnel` をクリック
+   - トンネル名を入力（例: `k3s-cloud-storage`）
+   - `Cloudflared` を選択して `Save tunnel` をクリック
+
+3. **トンネルトークンをコピー**
+   - トンネル作成後に表示される **トークン** をコピー
+   - または、`Install and run a connector` セクションのDocker実行コマンドから `--token` の後の文字列をコピー
+
+4. **トークンを設定ファイルに追加**
+   ```bash
+   # k8s/06-cloudflare-tunnel.yaml を編集
+   nano k8s/06-cloudflare-tunnel.yaml
+   
+   # 以下の YOUR_TUNNEL_TOKEN_HERE を実際のトークンに置き換え
+   # data:
+   #   TUNNEL_TOKEN: "YOUR_TUNNEL_TOKEN_HERE"
+   ```
+
+### ステップ3: Public Hostnameの設定
+
+Cloudflareダッシュボードのトンネル設定で、以下のPublic Hostnameを追加：
+
+| Public Hostname | Service | Type |
+|----------------|---------|------|
+| `nextcloud.yourdomain.com` | `http://nextcloud.cloud-storage.svc.cluster.local:80` | HTTP |
+| `collabora.yourdomain.com` | `http://collabora.cloud-storage.svc.cluster.local:9980` | HTTP |
+| `minio.yourdomain.com` | `http://minio.cloud-storage.svc.cluster.local:9001` | HTTP |
+
+**注意**: `yourdomain.com` を実際のドメインに置き換えてください。
+
+### ステップ4: デプロイの実行
 
 ```bash
-# Cloudflareダッシュボードを開く
-open https://dash.cloudflare.com/
+# デプロイスクリプトに実行権限を付与
+chmod +x deploy.sh status.sh cleanup.sh port-forward.sh
 
-# Zero Trust → Networks → Tunnels でトンネルを作成
-# トンネルトークンを取得後、k8s/06-cloudflare-tunnel.yaml の TUNNEL_TOKEN を置き換え
-```
-
-### 3. デプロイの実行
-
-```bash
-# スクリプトに実行権限を付与
-chmod +x deploy.sh
-
-# デプロイを実行（sudoが必要な場合があります）
+# デプロイを実行
 ./deploy.sh
 ```
 
-デプロイスクリプトは以下を自動的に行います：
-- k3sの存在確認（未インストールの場合はインストール）
-- Tailscale Auth Keyの確認と設定
-- 全てのKubernetesマニフェストの適用
-- デプロイメントの起動待機
-- アクセス情報の表示
+デプロイスクリプトは自動的に：
+- ✅ k3sのインストール（未インストールの場合）
+- ✅ namespaceの作成
+- ✅ ストレージのプロビジョニング
+- ✅ 全サービスのデプロイ
+- ✅ Cloudflare Tunnelの起動
+- ✅ サービスの起動待機
 
-### 4. サービスへのアクセス
+デプロイには5〜10分程度かかります。
 
-デプロイ完了後、以下のコマンドでローカルからアクセスできます：
+### ステップ5: サービスへのアクセス
+
+デプロイが完了したら、設定したドメインでアクセスできます：
+
+#### インターネット経由（Cloudflare Tunnel）
+
+- **NextCloud**: `https://nextcloud.yourdomain.com`
+  - 初回セットアップが自動実行されます
+  - 管理者アカウントは自動作成されます
+
+- **Collabora Online**: `https://collabora.yourdomain.com`
+  - NextCloudから自動的にアクセスされます
+
+- **MinIO Console**: `https://minio.yourdomain.com`
+  - ユーザー名: `minioadmin`
+  - パスワード: `minioadmin123`
+
+#### ローカルアクセス（ポートフォワード）
+
+開発やデバッグ用にローカルからもアクセスできます：
+
+```bash
+# ポートフォワードスクリプトを実行
+./port-forward.sh
+```
+
+または個別に：
 
 ```bash
 # MinIO Console
 kubectl port-forward -n cloud-storage svc/minio 9001:9001
-# http://localhost:9001 (minioadmin / minioadmin123)
+# → http://localhost:9001
 
 # NextCloud
 kubectl port-forward -n cloud-storage svc/nextcloud 8080:80
-# http://localhost:8080 (admin / admin123)
-
-# Nginx Proxy Manager
-kubectl port-forward -n cloud-storage svc/nginx-proxy-manager 8081:81
-# http://localhost:8081 (admin@example.com / changeme)
+# → http://localhost:8080
 
 # Collabora Online
 kubectl port-forward -n cloud-storage svc/collabora 9980:9980
-# http://localhost:9980
+# → http://localhost:9980
 ```
 
-## 🔧 詳細なセットアップ手順
+## 🔧 Cloudflare Tunnelのセットアップ
 
-### ステップ1: MinIOの初期設定
+### 完全なセットアップガイド
 
-1. MinIO Consoleにアクセス（http://localhost:9001）
-2. 認証情報でログイン：
-   - Username: `minioadmin`
-   - Password: `minioadmin123`
-3. バケットの作成：
-   - バケット名: `nextcloud`
-   - アクセス: Private
+詳細な手順は `docs/CLOUDFLARE_TUNNEL_SETUP.md` を参照してください。ここでは概要を説明します。
 
-### ステップ2: Cloudflare Tunnelの設定
+### 1. Cloudflare Zero Trustのセットアップ
 
-詳細な手順は `docs/CLOUDFLARE_TUNNEL_SETUP.md` を参照してください。
-
-**概要:**
-
-1. Cloudflareダッシュボードでトンネルを作成
-2. Public Hostnameを設定：
-   - `nextcloud.yourdomain.com` → `http://nextcloud.cloud-storage.svc.cluster.local:80`
-   - `collabora.yourdomain.com` → `http://collabora.cloud-storage.svc.cluster.local:9980`
-   - `minio.yourdomain.com` → `http://minio.cloud-storage.svc.cluster.local:9001`
-
-3. トンネルトークンを取得し、`k8s/06-cloudflare-tunnel.yaml`に設定
-
-4. アクセスポリシーの設定（オプション）：
-   - Zero Trust → Access → Applications
-   - 特定のユーザーやIPアドレスのみアクセスを許可
-
-### ステップ3: NextCloudの設定
-
-1. NextCloudにアクセス（初回アクセス時に自動セットアップ）
-
-2. **Collabora Onlineアプリのインストール:**
-   - 設定 > アプリ
-   - 「Collabora Online」を検索してインストール
-   - または「Nextcloud Office」をインストール
-
-3. **Collabora Onlineサーバーの設定:**
-   - 設定 > Nextcloud Office (または Collabora Online)
-   - "Use your own server" を選択
-   - URL: `https://collabora.yourdomain.com`
-   - または内部アクセス: `http://collabora.cloud-storage.svc.cluster.local:9980`
-
-4. **信頼されたドメインの追加:**
-   ```bash
-   # NextCloudのPodに入る
-   kubectl exec -it -n cloud-storage <nextcloud-pod-name> -- bash
-   
-   # config.phpを編集
-   vi /var/www/html/config/config.php
-   
-   # trusted_domains に追加
-   'trusted_domains' => 
-     array (
-       0 => 'localhost',
-       1 => 'nextcloud.yourdomain.com',
-       2 => '*.cloud-storage.svc.cluster.local',
-       3 => '*.cfargotunnel.com',  # Cloudflare Tunnel用
-     ),
-   ```
-
-5. **MinIOストレージの確認:**
-   - 設定 > 管理 > 追加のストレージ
-   - Primary storage: Object Storage (S3)
-   - 設定が正しく適用されていることを確認
-
-6. **Cloudflareプロキシ設定の最適化:**
-   - CloudflareダッシュボードでSSL/TLSモードを「Full」に設定
-   - WebSocketsを有効化
-   - 大きなファイルアップロード用にタイムアウトを調整
-
-## 📊 各サービスの設定
-
-### MinIO設定
-
-**デフォルト認証情報:**
-- Access Key: `minioadmin`
-- Secret Key: `minioadmin123`
-
-**変更方法:**
-`k8s/02-minio.yaml`のSecretセクションを編集：
-```yaml
-stringData:
-  rootUser: "your-new-user"
-  rootPassword: "your-new-password"
-```
-
-**バケットポリシーの設定:**
 ```bash
-# mc (MinIO Client) のインストール
-kubectl exec -it -n cloud-storage <minio-pod> -- bash
-
-# バケットポリシーの設定
-mc alias set myminio http://localhost:9000 minioadmin minioadmin123
-mc mb myminio/nextcloud
-mc policy set private myminio/nextcloud
+# ブラウザでCloudflare Zero Trustダッシュボードを開く
+https://one.dash.cloudflare.com/
 ```
 
-### NextCloud設定
+初回の場合、Zero Trustアカウントの作成が必要です（無料プランで十分）。
 
-**デフォルト管理者:**
-- Username: `admin`
-- Password: `admin123`
+### 2. トンネルの作成
 
-**重要な設定項目:**
+1. `Networks` → `Tunnels` → `Create a tunnel`
+2. トンネル名を入力（例: `k3s-cloud-storage`）
+3. コネクタータイプ: `Cloudflared` を選択
+4. `Save tunnel` をクリック
 
-1. **キャッシュ設定（推奨）:**
-   ```bash
-   kubectl exec -it -n cloud-storage <nextcloud-pod> -- bash
-   
-   # APCuを有効化
-   apt-get update && apt-get install -y php-apcu
-   
-   # config.phpに追加
-   'memcache.local' => '\OC\Memcache\APCu',
-   ```
+### 3. トンネルトークンの取得と設定
 
-2. **バックグラウンドジョブ:**
-   - 設定 > 管理 > 基本設定
-   - Cron を選択（推奨）
-   - CronJobをk8sに追加:
-     ```yaml
-     apiVersion: batch/v1
-     kind: CronJob
-     metadata:
-       name: nextcloud-cron
-       namespace: cloud-storage
-     spec:
-       schedule: "*/5 * * * *"
-       jobTemplate:
-         spec:
-           template:
-             spec:
-               containers:
-               - name: nextcloud-cron
-                 image: nextcloud:latest
-                 command: ["php", "-f", "/var/www/html/cron.php"]
-               restartPolicy: OnFailure
-     ```
+トンネル作成後に表示される画面で：
 
-3. **メール設定:**
-   - 設定 > 管理 > 基本設定 > メールサーバー
-   - SMTPサーバー情報を入力
+```bash
+# Docker実行コマンドの例が表示されます
+docker run cloudflare/cloudflared:latest tunnel --no-autoupdate run --token eyJhIjoiXXXXXXXXXXX...
 
-### Collabora Online設定
+# この --token の後の長い文字列がトンネルトークンです
+```
 
-**環境変数によるカスタマイズ:**
-
-`k8s/04-collabora.yaml`のConfigMapを編集：
+トークンを `k8s/06-cloudflare-tunnel.yaml` に設定：
 
 ```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-tunnel-token
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  TUNNEL_TOKEN: "eyJhIjoiXXXXXXXXXXX..."  # ここに実際のトークンをペースト
+```
+
+### 4. Public Hostnameの設定
+
+Cloudflareダッシュボードで、トンネルの `Public Hostname` タブを開き、以下を追加：
+
+#### NextCloud
+
+- **Subdomain**: `nextcloud`
+- **Domain**: `yourdomain.com`
+- **Service**: 
+  - Type: `HTTP`
+  - URL: `nextcloud.cloud-storage.svc.cluster.local:80`
+
+#### Collabora Online
+
+- **Subdomain**: `collabora`
+- **Domain**: `yourdomain.com`
+- **Service**: 
+  - Type: `HTTP`
+  - URL: `collabora.cloud-storage.svc.cluster.local:9980`
+
+#### MinIO Console
+
+- **Subdomain**: `minio`
+- **Domain**: `yourdomain.com`
+- **Service**: 
+  - Type: `HTTP`
+  - URL: `minio.cloud-storage.svc.cluster.local:9001`
+
+### 5. 追加設定（オプション）
+
+#### SSL/TLS設定の最適化
+
+Cloudflareダッシュボード → `SSL/TLS` で：
+
+- SSL/TLSモード: **Full** に設定
+- Edge Certificates: 自動管理（デフォルト）
+- Always Use HTTPS: 有効化
+
+#### パフォーマンス設定
+
+`Speed` → `Optimization` で：
+
+- Auto Minify: HTML, CSS, JS を有効化
+- Brotli: 有効化
+- HTTP/2: 有効化（デフォルト）
+- HTTP/3 (QUIC): 有効化
+
+#### アクセスポリシー（セキュリティ強化）
+
+`Zero Trust` → `Access` → `Applications` で各サービスにアクセス制御を追加：
+
+**例: NextCloudへのアクセスを特定のEmailのみに制限**
+
+1. `Add an application` をクリック
+2. Application type: `Self-hosted`
+3. Application domain: `nextcloud.yourdomain.com`
+4. Policy設定:
+   - Policy name: `Allow specific users`
+   - Action: `Allow`
+   - Include: `Emails` → 許可するメールアドレスを追加
+
+**例: MinIO ConsoleへのアクセスをIPアドレスで制限**
+
+1. Application domain: `minio.yourdomain.com`
+2. Policy設定:
+   - Include: `IP ranges` → `192.168.1.0/24` など
+
+## ⚙️ 各サービスの設定
+
+### NextCloudの初期設定
+
+NextCloudに初めてアクセスすると、自動セットアップが実行されます。
+
+#### 1. Collabora Onlineの統合
+
+NextCloudにログイン後：
+
+1. **アプリのインストール**
+   - 右上のアイコン → `アプリ`
+   - `Office & text` カテゴリ
+   - `Nextcloud Office` または `Collabora Online` を検索してインストール
+
+2. **Collaboraサーバーの設定**
+   - `設定` → `管理` → `Nextcloud Office`
+   - `Use your own server` を選択
+   - サーバーURL: `https://collabora.yourdomain.com`
+   - `保存` をクリック
+
+3. **動作確認**
+   - ファイルアプリで `.docx`, `.xlsx`, `.pptx` ファイルをアップロード
+   - クリックして編集できることを確認
+
+#### 2. 信頼されたドメインの追加
+
+Cloudflare Tunnel経由でアクセスする場合、信頼されたドメインを追加：
+
+```bash
+# NextCloudのPod名を確認
+kubectl get pods -n cloud-storage -l app=nextcloud
+
+# Podに入る
+kubectl exec -it -n cloud-storage <nextcloud-pod-name> -- bash
+
+# config.phpを編集
+vi /var/www/html/config/config.php
+```
+
+以下を追加：
+
+```php
+'trusted_domains' => 
+  array (
+    0 => 'localhost',
+    1 => 'nextcloud.yourdomain.com',  # 実際のドメインに置き換え
+    2 => '*.cloud-storage.svc.cluster.local',
+  ),
+'trusted_proxies' => array('10.0.0.0/8'),  # k8s内部ネットワーク
+'overwriteprotocol' => 'https',  # Cloudflare Tunnel経由はHTTPS
+'overwrite.cli.url' => 'https://nextcloud.yourdomain.com',
+```
+
+#### 3. パフォーマンスの最適化
+
+**APCuキャッシュの有効化**（推奨）:
+
+```bash
+kubectl exec -it -n cloud-storage <nextcloud-pod-name> -- bash
+
+# APCuのインストール
+apt-get update && apt-get install -y php-apcu
+
+# config.phpに追加
+echo "'memcache.local' => '\OC\Memcache\APCu'," >> /var/www/html/config/config.php
+```
+
+**Cronジョブの設定**:
+
+NextCloudの管理画面で：
+- `設定` → `管理` → `基本設定`
+- バックグラウンドジョブ: `Cron` を選択
+
+### MinIOの設定
+
+#### デフォルト認証情報
+
+- **Access Key**: `minioadmin`
+- **Secret Key**: `minioadmin123`
+
+#### 本番環境での認証情報変更（推奨）
+
+`k8s/02-minio.yaml` を編集：
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  rootUser: "your-secure-username"      # 変更する
+  rootPassword: "your-secure-password"  # 変更する
+```
+
+変更後、再デプロイ：
+
+```bash
+kubectl apply -f k8s/02-minio.yaml
+kubectl rollout restart deployment/minio -n cloud-storage
+```
+
+#### バケットの確認
+
+MinIO Consoleにアクセスして、`nextcloud` バケットが作成されていることを確認。
+
+### Collabora Onlineの設定
+
+#### ドメイン設定
+
+`k8s/04-collabora.yaml` でNextCloudのドメインを指定：
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collabora-config
+  namespace: cloud-storage
 data:
-  domain: "nextcloud\\.yourdomain\\.com"  # エスケープ必要
+  domain: "nextcloud\\.yourdomain\\.com"  # バックスラッシュでエスケープ
   username: "admin"
-  password: "secure-password"
-  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:logging.level=warning"
-  dictionaries: "en_US ja zh_CN"  # 必要な言語を追加
+  password: "collabora-admin-password"  # 変更推奨
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
 ```
 
-**パフォーマンスチューニング:**
+**複数ドメインを許可する場合**:
+
 ```yaml
-env:
-- name: extra_params
-  value: "--o:ssl.enable=false --o:ssl.termination=true --o:child_root_path=/opt/lool/child-roots --o:mount_jail_tree=false --o:logging.level=warning --o:per_document.idle_timeout_secs=3600 --o:per_document.max_concurrency=4"
+domain: "nextcloud\\.yourdomain\\.com|nextcloud\\.otherdomain\\.com"
 ```
 
-### Cloudflare Tunnel設定
+#### 日本語サポート
 
-**環境変数:**
-
-`k8s/06-cloudflare-tunnel.yaml`で設定：
+日本語フォントと辞書を追加：
 
 ```yaml
 env:
-- name: TUNNEL_TOKEN
-  valueFrom:
-    secretKeyRef:
-      name: cloudflare-tunnel-token
-      key: TUNNEL_TOKEN
-- name: TUNNEL_METRICS
-  value: "0.0.0.0:2000"
-- name: TUNNEL_LOGLEVEL
-  value: "info"
+- name: dictionaries
+  value: "en_US ja"
 ```
 
-**アクセスポリシー（Cloudflareダッシュボード）:**
+### Cloudflare Tunnelの管理
 
-Zero Trust → Access → Applications で設定：
-- Email認証
-- IP制限
-- 国別制限
-- デバイス認証（Cloudflare WARP使用時）
+#### トンネルの状態確認
 
-**パフォーマンスチューニング:**
-- Cloudflareダッシュボード → Speed → Optimization
-- Auto Minify有効化
-- Brotli圧縮有効化
-- キャッシュルールの設定
+```bash
+# cloudflaredのログを確認
+kubectl logs -n cloud-storage -l app=cloudflare-tunnel -f
 
-## 🔍 監視とメンテナンス
+# トンネルの接続状態
+# Cloudflareダッシュボード → Networks → Tunnels で確認
+```
+
+#### トンネルの再起動
+
+```bash
+kubectl rollout restart deployment/cloudflare-tunnel -n cloud-storage
+```
+
+#### メトリクスの確認
+
+cloudflaredはメトリクスエンドポイントを公開しています：
+
+```bash
+# メトリクスポートをフォワード
+kubectl port-forward -n cloud-storage svc/cloudflare-tunnel 2000:2000
+
+# メトリクスにアクセス
+curl http://localhost:2000/metrics
+```
+
+## 🔍 運用とメンテナンス
+
+### ステータスの確認
+
+便利なスクリプトを用意しています：
+
+```bash
+# 全サービスの状態を確認
+./status.sh
+```
+
+または手動で：
+
+```bash
+# Pod一覧
+kubectl get pods -n cloud-storage
+
+# サービス一覧
+kubectl get svc -n cloud-storage
+
+# PVC一覧
+kubectl get pvc -n cloud-storage
+```
 
 ### ログの確認
 
-```bash
-# 全Podのログ
-kubectl logs -n cloud-storage -l app=nextcloud
+#### 各サービスのログ
 
-# 特定のPodのログ
+```bash
+# NextCloud
+kubectl logs -n cloud-storage -l app=nextcloud -f
+
+# MinIO
+kubectl logs -n cloud-storage -l app=minio -f
+
+# Collabora Online
+kubectl logs -n cloud-storage -l app=collabora -f
+
+# Cloudflare Tunnel
+kubectl logs -n cloud-storage -l app=cloudflare-tunnel -f
+
+# PostgreSQL
+kubectl logs -n cloud-storage -l app=nextcloud-db -f
+```
+
+#### 問題発生時のログ確認
+
+```bash
+# Pod名を確認
+kubectl get pods -n cloud-storage
+
+# 特定のPodのログ（リアルタイム）
 kubectl logs -n cloud-storage <pod-name> -f
 
-# 前のPodのログ（クラッシュした場合）
+# クラッシュしたPodの前回のログ
 kubectl logs -n cloud-storage <pod-name> --previous
 ```
 
-### リソース使用状況
+### リソース監視
 
 ```bash
-# Pod毎のリソース使用状況
+# Podのリソース使用状況
 kubectl top pods -n cloud-storage
 
 # ノードのリソース使用状況
 kubectl top nodes
 
-# PVCの使用状況
+# PVCストレージ使用状況
 kubectl get pvc -n cloud-storage
 ```
 
-### バックアップ
+出力例：
+```
+NAME                      STATUS   VOLUME   CAPACITY   ACCESS MODES
+minio-storage             Bound    pv-xxx   50Gi       RWO
+nextcloud-storage         Bound    pv-yyy   30Gi       RWO
+nextcloud-db-storage      Bound    pv-zzz   10Gi       RWO
+```
 
-**MinIOデータのバックアップ:**
+### バックアップ戦略
+
+#### 1. データベースバックアップ（重要）
+
 ```bash
+# PostgreSQLをバックアップ
+kubectl exec -n cloud-storage deployment/nextcloud-db -- \
+  pg_dump -U nextcloud nextcloud > nextcloud-db-$(date +%Y%m%d).sql
+
+# バックアップの復元
+cat nextcloud-db-20250115.sql | \
+  kubectl exec -i -n cloud-storage deployment/nextcloud-db -- \
+  psql -U nextcloud nextcloud
+```
+
+#### 2. MinIOデータバックアップ
+
+```bash
+# MinIOのPodに入る
+kubectl exec -it -n cloud-storage deployment/minio -- sh
+
 # mc (MinIO Client) でバックアップ
-kubectl exec -it -n cloud-storage <minio-pod> -- bash
-mc mirror myminio/nextcloud /backup/nextcloud-$(date +%Y%m%d)
+mc alias set local http://localhost:9000 minioadmin minioadmin123
+mc mirror local/nextcloud /backup/nextcloud-$(date +%Y%m%d)
 ```
 
-**NextCloud設定のバックアップ:**
+#### 3. NextCloud設定バックアップ
+
 ```bash
-# ConfigとData
-kubectl exec -n cloud-storage <nextcloud-pod> -- tar czf /tmp/nextcloud-backup.tar.gz /var/www/html/config /var/www/html/data
-kubectl cp cloud-storage/<nextcloud-pod>:/tmp/nextcloud-backup.tar.gz ./nextcloud-backup.tar.gz
+# 設定ファイルをバックアップ
+kubectl exec -n cloud-storage deployment/nextcloud -- \
+  tar czf - /var/www/html/config > nextcloud-config-$(date +%Y%m%d).tar.gz
+
+# 復元
+kubectl cp nextcloud-config-20250115.tar.gz \
+  cloud-storage/nextcloud-xxx:/tmp/
+kubectl exec -n cloud-storage deployment/nextcloud -- \
+  tar xzf /tmp/nextcloud-config-20250115.tar.gz -C /
 ```
 
-**データベースのバックアップ:**
-```bash
-# PostgreSQLダンプ
-kubectl exec -n cloud-storage <nextcloud-db-pod> -- pg_dump -U nextcloud nextcloud > nextcloud-db-backup.sql
+#### 4. 自動バックアップ（CronJob）
+
+`k8s/backup-cronjob.yaml` を作成：
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nextcloud-backup
+  namespace: cloud-storage
+spec:
+  schedule: "0 2 * * *"  # 毎日午前2時
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: postgres:15
+            command:
+            - /bin/sh
+            - -c
+            - pg_dump -h nextcloud-db -U nextcloud nextcloud > /backup/nextcloud-$(date +\%Y\%m\%d).sql
+            env:
+            - name: PGPASSWORD
+              value: "nextcloud123"
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+          volumes:
+          - name: backup
+            hostPath:
+              path: /backup/nextcloud
+          restartPolicy: OnFailure
 ```
 
 ### アップデート
 
-```bash
-# イメージの更新
-kubectl set image deployment/nextcloud nextcloud=nextcloud:latest -n cloud-storage
+#### イメージの更新
 
-# ローリングアップデート
+```bash
+# NextCloudを最新版に更新
+kubectl set image deployment/nextcloud \
+  nextcloud=nextcloud:latest -n cloud-storage
+
+# 特定のバージョンを指定
+kubectl set image deployment/nextcloud \
+  nextcloud=nextcloud:28 -n cloud-storage
+```
+
+#### ローリングアップデート
+
+```bash
+# NextCloud
 kubectl rollout restart deployment/nextcloud -n cloud-storage
 
-# アップデート状況の確認
+# MinIO
+kubectl rollout restart deployment/minio -n cloud-storage
+
+# Collabora
+kubectl rollout restart deployment/collabora -n cloud-storage
+
+# Cloudflare Tunnel
+kubectl rollout restart deployment/cloudflare-tunnel -n cloud-storage
+```
+
+#### アップデート状況の確認
+
+```bash
+# ローリングアップデートの進行状況
 kubectl rollout status deployment/nextcloud -n cloud-storage
+
+# 履歴確認
+kubectl rollout history deployment/nextcloud -n cloud-storage
+
+# ロールバック
+kubectl rollout undo deployment/nextcloud -n cloud-storage
+```
+
+### スケーリング
+
+#### 水平スケーリング（レプリカ数の変更）
+
+```bash
+# NextCloudのレプリカ数を増やす
+kubectl scale deployment/nextcloud --replicas=3 -n cloud-storage
+
+# Collaboraのレプリカ数を増やす
+kubectl scale deployment/collabora --replicas=2 -n cloud-storage
+```
+
+**注意**: MinIOとPostgreSQLは単一レプリカ推奨（StatefulSetへの変更が必要）
+
+#### 垂直スケーリング（リソース制限の変更）
+
+`k8s/03-nextcloud.yaml` を編集：
+
+```yaml
+resources:
+  requests:
+    memory: "2Gi"    # 増やす
+    cpu: "1000m"     # 増やす
+  limits:
+    memory: "4Gi"    # 増やす
+    cpu: "2000m"     # 増やす
+```
+
+再適用：
+
+```bash
+kubectl apply -f k8s/03-nextcloud.yaml
 ```
 
 ## 🐛 トラブルシューティング
 
-### 一般的な問題
+### よくある問題と解決方法
 
-#### 1. Podが起動しない
+#### 1. Podが起動しない（Pending/CrashLoopBackOff）
 
+**状態確認:**
 ```bash
-# Pod状態の確認
+# Pod一覧を確認
 kubectl get pods -n cloud-storage
 
-# 詳細情報
+# 詳細情報を確認
 kubectl describe pod <pod-name> -n cloud-storage
 
-# イベント確認
+# イベントログを確認
 kubectl get events -n cloud-storage --sort-by='.lastTimestamp'
 ```
 
-**よくある原因:**
-- PVCがバウンドされていない
-- イメージのPullに失敗
-- リソース不足
+**よくある原因と対処:**
 
-#### 2. NextCloudがMinIOに接続できない
+| 症状 | 原因 | 解決方法 |
+|------|------|---------|
+| Pending状態 | PVCがBoundされていない | `kubectl get pvc -n cloud-storage` で確認。StorageClassを設定 |
+| ImagePullBackOff | イメージのダウンロード失敗 | インターネット接続を確認。プロキシ設定が必要な場合は設定 |
+| CrashLoopBackOff | コンテナ起動失敗 | `kubectl logs -n cloud-storage <pod-name>` でログ確認 |
+| Insufficient resources | リソース不足 | `kubectl top nodes` でリソース確認。不要なPodを削除 |
+
+#### 2. Cloudflare Tunnel経由でアクセスできない
+
+**チェックリスト:**
+
+```bash
+# cloudflaredのログを確認
+kubectl logs -n cloud-storage -l app=cloudflare-tunnel -f
+```
+
+確認ポイント：
+
+- [ ] トンネルトークンが正しく設定されているか
+- [ ] Cloudflareダッシュボードでトンネルが「HEALTHY」状態か
+- [ ] Public Hostnameが正しく設定されているか
+- [ ] DNS設定が反映されているか（最大48時間かかる場合あり）
+
+**トンネル状態の確認:**
+
+Cloudflareダッシュボード → `Zero Trust` → `Networks` → `Tunnels` で確認
+
+**よくあるエラー:**
+
+```
+Unable to reach the origin service
+```
+→ Service URLが間違っている。`service-name.namespace.svc.cluster.local` の形式を確認
+
+```
+Authentication error
+```
+→ トンネルトークンが間違っている。`k8s/06-cloudflare-tunnel.yaml` を確認
+
+#### 3. NextCloudにアクセスできない
+
+**診断コマンド:**
 
 ```bash
 # NextCloudのログ確認
-kubectl logs -n cloud-storage -l app=nextcloud | grep -i "s3\|minio\|objectstore"
+kubectl logs -n cloud-storage -l app=nextcloud --tail=100
 
-# MinIOの接続テスト
-kubectl exec -n cloud-storage <nextcloud-pod> -- curl http://minio:9000
+# NextCloud Podの状態確認
+kubectl get pods -n cloud-storage -l app=nextcloud
+
+# データベース接続テスト
+kubectl exec -n cloud-storage deployment/nextcloud -- \
+  nc -zv nextcloud-db 5432
 ```
 
-**チェックポイント:**
-- MinIOのバケットが作成されているか
-- 認証情報が正しいか
-- ネットワークポリシーが干渉していないか
+**よくある問題:**
 
-#### 3. Collabora OnlineがNextCloudと連携できない
+- **「信頼されたドメインではありません」エラー**
+  ```bash
+  kubectl exec -it -n cloud-storage deployment/nextcloud -- bash
+  vi /var/www/html/config/config.php
+  # trusted_domains に使用するドメインを追加
+  ```
+
+- **データベース接続エラー**
+  ```bash
+  # データベースの状態確認
+  kubectl logs -n cloud-storage -l app=nextcloud-db
+  ```
+
+- **ストレージ容量不足**
+  ```bash
+  # PVCの容量確認
+  kubectl get pvc -n cloud-storage
+  kubectl describe pvc nextcloud-storage -n cloud-storage
+  ```
+
+#### 4. Collabora OnlineがNextCloudと連携しない
+
+**チェックポイント:**
 
 ```bash
 # Collaboraのログ確認
-kubectl logs -n cloud-storage -l app=collabora
+kubectl logs -n cloud-storage -l app=collabora --tail=50
 
-# NextCloudからの接続テスト
-kubectl exec -n cloud-storage <nextcloud-pod> -- curl http://collabora:9980
+# NextCloudからCollaboraへの接続テスト
+kubectl exec -n cloud-storage deployment/nextcloud -- \
+  curl -v http://collabora.cloud-storage.svc.cluster.local:9980
 ```
 
-**チェックポイント:**
-- domainパラメータが正しくエスケープされているか
-- NextCloudの信頼されたドメインに追加されているか
-- SSL設定が整合しているか
+**設定確認:**
 
-#### 4. Tailscale経由でアクセスできない
+1. **domain設定が正しいか確認**
+   ```bash
+   kubectl get configmap collabora-config -n cloud-storage -o yaml
+   ```
+   ドメインが正しくエスケープされているか確認（`nextcloud\\.yourdomain\\.com`）
+
+2. **NextCloudのCollabora設定**
+   - NextCloud管理画面 → `設定` → `Nextcloud Office`
+   - サーバーURL: `https://collabora.yourdomain.com`
+
+3. **WOPIアクセス確認**
+   Collaboraログで以下のエラーがないか確認：
+   ```
+   WOPI::CheckFileInfo failed
+   ```
+
+#### 5. MinIO接続エラー
+
+**診断:**
 
 ```bash
-# Tailscale Podの状態確認
-kubectl logs -n cloud-storage -l app=tailscale-subnet-router
+# MinIOのログ確認
+kubectl logs -n cloud-storage -l app=minio
 
-# ルーティング確認
-kubectl exec -n cloud-storage <tailscale-pod> -- tailscale status
-kubectl exec -n cloud-storage <tailscale-pod> -- tailscale netcheck
+# MinIOへの接続テスト
+kubectl exec -n cloud-storage deployment/nextcloud -- \
+  curl -v http://minio.cloud-storage.svc.cluster.local:9000
+
+# バケット確認
+kubectl exec -it -n cloud-storage deployment/minio -- sh
+mc alias set local http://localhost:9000 minioadmin minioadmin123
+mc ls local/
 ```
 
-**チェックポイント:**
-- Auth Keyが有効か
-- Subnet routesが承認されているか
-- ファイアウォール設定
+**よくあるエラー:**
 
-#### 5. PVC が Pending 状態
+- **バケットが存在しない**
+  ```bash
+  mc mb local/nextcloud
+  mc policy set private local/nextcloud
+  ```
+
+- **認証エラー**
+  `k8s/02-minio.yaml` と `k8s/03-nextcloud.yaml` の認証情報が一致しているか確認
+
+#### 6. PVCがPending状態
+
+**原因確認:**
 
 ```bash
-# PVC状態確認
-kubectl get pvc -n cloud-storage
 kubectl describe pvc <pvc-name> -n cloud-storage
-
-# StorageClass確認
-kubectl get storageclass
 ```
 
 **解決方法:**
+
 ```bash
-# デフォルトのlocal-pathストレージクラスを使用
-kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+# StorageClassを確認
+kubectl get storageclass
+
+# デフォルトStorageClassが設定されていない場合
+kubectl patch storageclass local-path -p \
+  '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+# k3s特有の問題の場合
+sudo systemctl restart k3s
 ```
 
-### パフォーマンスチューニング
+### パフォーマンスの改善
 
-#### NextCloudが遅い場合
+#### NextCloudが重い場合
 
-1. **PHPメモリ制限の増加:**
+1. **PHPメモリを増やす**
+   
+   `k8s/03-nextcloud.yaml` に追加：
+   ```yaml
+   env:
+   - name: PHP_MEMORY_LIMIT
+     value: "512M"
+   - name: PHP_UPLOAD_LIMIT
+     value: "10G"
+   ```
+
+2. **APCuキャッシュを有効化**
+   ```bash
+   kubectl exec -it -n cloud-storage deployment/nextcloud -- bash
+   apt-get update && apt-get install -y php-apcu
+   echo "'memcache.local' => '\OC\Memcache\APCu'," >> /var/www/html/config/config.php
+   ```
+
+3. **レプリカを増やす**
+   ```bash
+   kubectl scale deployment/nextcloud --replicas=2 -n cloud-storage
+   ```
+
+#### ファイルアップロードが遅い場合
+
+**Cloudflare設定の最適化:**
+
+1. Cloudflareダッシュボード → `Speed` → `Optimization`
+   - Auto Minify: 無効化（大きなファイルでは不要）
+   - Brotli: 有効化
+
+2. `Rules` → `Configuration Rules`
+   - NextCloudドメインに対してキャッシュを無効化
+   - タイムアウトを延長
+
+3. `Network`
+   - HTTP/2: 有効化
+   - HTTP/3 (QUIC): 有効化
+   - WebSockets: 有効化
+
+#### Collaboraが遅い場合
+
 ```yaml
-# k8s/03-nextcloud.yaml
-env:
-- name: PHP_MEMORY_LIMIT
-  value: "512M"
-- name: PHP_UPLOAD_LIMIT
-  value: "10G"
-```
-
-2. **レプリカ数の増加:**
-```yaml
-# k8s/03-nextcloud.yaml
-spec:
-  replicas: 2  # 水平スケーリング
-```
-
-3. **リソース制限の調整:**
-```yaml
+# k8s/04-collabora.yaml
 resources:
   requests:
-    memory: "1Gi"
-    cpu: "500m"
+    memory: "2Gi"
+    cpu: "1000m"
   limits:
     memory: "4Gi"
     cpu: "2000m"
 ```
 
-#### MinIOのパフォーマンス改善
+### デバッグコマンド集
 
-```yaml
-# k8s/02-minio.yaml
-args:
-- server
-- /data
-- --console-address
-- ":9001"
-env:
-- name: MINIO_CACHE
-  value: "on"
-- name: MINIO_CACHE_DRIVES
-  value: "/cache"
-- name: MINIO_CACHE_QUOTA
-  value: "80"
+```bash
+# すべてのリソースを確認
+kubectl get all -n cloud-storage
+
+# Pod内でシェルを実行
+kubectl exec -it -n cloud-storage <pod-name> -- /bin/bash
+
+# ポートフォワードでローカルテスト
+kubectl port-forward -n cloud-storage svc/nextcloud 8080:80
+
+# 設定の確認
+kubectl get configmap -n cloud-storage
+kubectl get secret -n cloud-storage
+
+# リソース使用状況
+kubectl top pods -n cloud-storage
+kubectl top nodes
+
+# ネットワーク診断
+kubectl exec -n cloud-storage deployment/nextcloud -- ping minio
+kubectl exec -n cloud-storage deployment/nextcloud -- nslookup minio
 ```
 
 ## 🗑️ アンインストール
 
 ### クリーンアップスクリプトの使用
 
-```bash
-# スクリプトに実行権限を付与
-chmod +x cleanup.sh
+簡単に全てを削除できます：
 
-# クリーンアップ実行
+```bash
 ./cleanup.sh
 ```
+
+このスクリプトは以下を実行します：
+- cloud-storage namespaceの削除（全リソース含む）
+- 永続ボリューム（PV）の削除
+- 確認メッセージ表示
 
 ### 手動でのアンインストール
 
 ```bash
-# namespace削除（全リソースが削除される）
+# 1. namespace削除（全リソースが削除される）
 kubectl delete namespace cloud-storage
 
-# PVの確認と削除（必要に応じて）
+# 2. PVの確認
 kubectl get pv
+
+# 3. 必要に応じてPVを削除
 kubectl delete pv <pv-name>
+
+# 4. Cloudflare Tunnelの削除（Cloudflareダッシュボード）
+# Zero Trust → Networks → Tunnels から該当トンネルを削除
 ```
 
-## 📚 参考リンク
+### k3sの完全削除（オプション）
 
-- [MinIO Documentation](https://min.io/docs/minio/kubernetes/upstream/)
-- [NextCloud Documentation](https://docs.nextcloud.com/)
-- [Collabora Online Documentation](https://sdk.collaboraonline.com/)
-- [Cloudflare Tunnel Documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
-- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
-- [k3s Documentation](https://docs.k3s.io/)
+k3s自体も削除する場合：
 
-## 🤝 貢献
+```bash
+# k3sをアンインストール
+/usr/local/bin/k3s-uninstall.sh
 
-プロジェクトへの貢献を歓迎します！
+# データディレクトリを削除
+sudo rm -rf /var/lib/rancher/k3s
+```
 
-## 📄 ライセンス
+## � セキュリティのベストプラクティス
 
-MIT License
+### 本番環境での推奨設定
 
-## 🔐 セキュリティに関する注意
+#### 1. デフォルトパスワードの変更（必須）
 
-- 本番環境では必ず全てのデフォルトパスワードを変更してください
-- Cloudflare Tunnelは自動的にSSL/TLS証明書を管理します
-- 定期的なバックアップを実施してください
-- セキュリティアップデートを適用してください
-- Cloudflare Zero Trustアクセスポリシーを適切に設定してください
-- Cloudflare WAFでセキュリティルールを設定することを推奨
+**MinIO:**
+```yaml
+# k8s/02-minio.yaml
+stringData:
+  rootUser: "your-secure-admin-username"
+  rootPassword: "your-very-strong-password-123!"
+```
+
+**NextCloud:**
+初回セットアップ時に強力な管理者パスワードを設定
+
+**Collabora:**
+```yaml
+# k8s/04-collabora.yaml
+data:
+  username: "collabora-admin"
+  password: "strong-collabora-password-456!"
+```
+
+#### 2. Cloudflare Zero Trustアクセスポリシー
+
+**Email認証を追加:**
+```
+Zero Trust → Access → Applications → Add an application
+- Application domain: nextcloud.yourdomain.com
+- Policy: Allow emails ending in @yourcompany.com
+```
+
+**IP制限を追加:**
+```
+- Policy: Allow IP ranges
+- IP ranges: 203.0.113.0/24 (オフィスのIP)
+```
+
+**国別制限:**
+```
+- Policy: Block countries
+- Countries: 特定の国をブロック
+```
+
+#### 3. SSL/TLS設定
+
+Cloudflareダッシュボード → `SSL/TLS`:
+- SSL/TLSモード: **Full (strict)** を推奨
+- Minimum TLS Version: **TLS 1.2** 以上
+- Always Use HTTPS: 有効化
+- Automatic HTTPS Rewrites: 有効化
+
+#### 4. ファイアウォールルール
+
+Cloudflareダッシュボード → `Security` → `WAF`:
+- Managed Rulesを有効化
+- Rate Limitingを設定（DDoS対策）
+- Bot Fight Modeを有効化
+
+#### 5. 定期的なバックアップ
+
+```bash
+# Cronで毎日バックアップ
+0 2 * * * /path/to/backup-script.sh
+```
+
+#### 6. アップデートの適用
+
+```bash
+# 月1回のアップデート確認
+kubectl set image deployment/nextcloud nextcloud=nextcloud:latest -n cloud-storage
+kubectl set image deployment/collabora collabora=collabora/code:latest -n cloud-storage
+```
+
+#### 7. ログ監視
+
+```bash
+# 異常なアクセスログの確認
+kubectl logs -n cloud-storage -l app=cloudflare-tunnel | grep -i "error\|fail"
+```
 
 ## ⚙️ カスタマイズ
 
 ### ストレージ容量の変更
 
-各PVCの容量は以下のファイルで変更できます：
-
-- MinIO: `k8s/02-minio.yaml` (デフォルト: 50Gi)
-- NextCloud: `k8s/03-nextcloud.yaml` (デフォルト: 30Gi)
-- NextCloud DB: `k8s/03-nextcloud.yaml` (デフォルト: 10Gi)
-- NPM: `k8s/05-nginx-proxy-manager.yaml` (デフォルト: 5Gi)
-
-### レプリカ数の変更
-
-高可用性が必要な場合、レプリカ数を増やせます：
+各サービスのストレージ容量を変更：
 
 ```yaml
-spec:
-  replicas: 3  # 3つのレプリカ
+# k8s/02-minio.yaml - MinIOストレージ
+resources:
+  requests:
+    storage: 100Gi  # デフォルト: 50Gi
+
+# k8s/03-nextcloud.yaml - NextCloudストレージ
+resources:
+  requests:
+    storage: 50Gi   # デフォルト: 30Gi
+
+# k8s/03-nextcloud.yaml - データベースストレージ
+resources:
+  requests:
+    storage: 20Gi   # デフォルト: 10Gi
 ```
 
-**注意**: データベースとMinIOは単一レプリカを推奨（StatefulSetへの変更が必要）
+変更後、再デプロイ：
+```bash
+kubectl apply -f k8s/02-minio.yaml
+kubectl apply -f k8s/03-nextcloud.yaml
+```
+
+### レプリカ数の変更（高可用性）
+
+```bash
+# NextCloudを3レプリカに
+kubectl scale deployment/nextcloud --replicas=3 -n cloud-storage
+
+# Collaboraを2レプリカに
+kubectl scale deployment/collabora --replicas=2 -n cloud-storage
+
+# cloudflaredを2レプリカに（冗長性）
+kubectl scale deployment/cloudflare-tunnel --replicas=2 -n cloud-storage
+```
+
+**YAMLで永続的に設定:**
+```yaml
+# k8s/03-nextcloud.yaml
+spec:
+  replicas: 3  # 変更
+```
 
 ### ネームスペースの変更
 
-全ての`.yaml`ファイル内の`cloud-storage`を別の名前に変更してください。
+全ての`.yaml`ファイルの`cloud-storage`を変更：
+
+```bash
+# sedで一括置換
+sed -i '' 's/cloud-storage/my-storage/g' k8s/*.yaml
+
+# 適用
+./deploy.sh
+```
+
+### カスタムドメインの設定
+
+1. **Cloudflare Tunnelの設定を更新**
+   - Cloudflareダッシュボードで Public Hostname を変更
+
+2. **Collaboraの設定を更新**
+   ```yaml
+   # k8s/04-collabora.yaml
+   data:
+     domain: "nextcloud\\.newdomain\\.com"
+   ```
+
+3. **NextCloudの信頼されたドメインを更新**
+   ```bash
+   kubectl exec -it -n cloud-storage deployment/nextcloud -- bash
+   vi /var/www/html/config/config.php
+   ```
+
+## 📚 参考リンク
+
+### 公式ドキュメント
+
+- [Cloudflare Tunnel Documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
+- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
+- [NextCloud Documentation](https://docs.nextcloud.com/)
+- [Collabora Online Documentation](https://sdk.collaboraonline.com/)
+- [MinIO Documentation](https://min.io/docs/minio/kubernetes/upstream/)
+- [k3s Documentation](https://docs.k3s.io/)
+
+### コミュニティ
+
+- [NextCloud Community Forum](https://help.nextcloud.com/)
+- [Collabora Online Forum](https://forum.collaboraoffice.com/)
+- [MinIO Slack](https://slack.min.io/)
+- [Cloudflare Community](https://community.cloudflare.com/)
+
+### チュートリアル
+
+- [Cloudflare Tunnel Quick Start](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/)
+- [NextCloud on Kubernetes](https://docs.nextcloud.com/server/latest/admin_manual/installation/kubernetes.html)
+- [k3s Getting Started](https://rancher.com/docs/k3s/latest/en/quick-start/)
+
+## 🤝 貢献
+
+プロジェクトへの貢献を歓迎します！
+
+### 貢献方法
+
+1. このリポジトリをフォーク
+2. 新しいブランチを作成 (`git checkout -b feature/amazing-feature`)
+3. 変更をコミット (`git commit -m 'Add some amazing feature'`)
+4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
+5. Pull Requestを作成
+
+### 報告
+
+バグや機能要望は [Issues](https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline/issues) で報告してください。
+
+## 📄 ライセンス
+
+MIT License
+
+## 🙏 謝辞
+
+このプロジェクトは以下のオープンソースプロジェクトを使用しています：
+
+- [k3s](https://k3s.io/) - Lightweight Kubernetes
+- [MinIO](https://min.io/) - High Performance Object Storage
+- [NextCloud](https://nextcloud.com/) - Self-hosted Cloud Platform
+- [Collabora Online](https://www.collaboraoffice.com/) - Online Office Suite
+- [Cloudflare](https://www.cloudflare.com/) - Global Network & Security
+- [PostgreSQL](https://www.postgresql.org/) - Advanced Open Source Database
 
 ---
 
-**作成日**: 2025年11月5日
-**更新日**: 2025年11月5日
+**リポジトリ**: [https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline](https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline)
+
+**作成日**: 2025年11月5日  
+**最終更新**: 2025年11月5日
+
+**メンテナー**: [@JarodBruce](https://github.com/JarodBruce)
+
+---
+
+💡 **ヒント**: 質問や問題がある場合は、[Issues](https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline/issues)で質問するか、[Discussions](https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline/discussions)で議論してください。
