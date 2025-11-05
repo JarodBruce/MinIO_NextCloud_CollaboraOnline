@@ -1,7 +1,7 @@
 # k3s クラウドストレージ環境
-# MinIO + NextCloud + Collabora Online + Nginx Proxy Manager + Tailscale
+# MinIO + NextCloud + Collabora Online + Cloudflare Tunnel
 
-このプロジェクトは、k3s上にMinIO、NextCloud、Collabora Online、Nginx Proxy Managerを構築し、Tailscale経由でアクセスできるクラウドストレージ環境を提供します。
+このプロジェクトは、k3s上にMinIO、NextCloud、Collabora Onlineを構築し、Cloudflare Tunnel経由で安全にアクセスできるクラウドストレージ環境を提供します。
 
 ## 📋 目次
 
@@ -21,8 +21,7 @@
 - **MinIO**: S3互換のオブジェクトストレージ（NextCloudのバックエンドストレージ）
 - **NextCloud**: ファイル共有・同期プラットフォーム
 - **Collabora Online**: オンラインオフィススイート（NextCloudと統合）
-- **Nginx Proxy Manager**: リバースプロキシ管理（SSL終端とルーティング）
-- **Tailscale**: セキュアなVPN接続（外部からのアクセス用）
+- **Cloudflare Tunnel**: ゼロトラストネットワークアクセス（外部からの安全なアクセス）
 - **PostgreSQL**: NextCloudのデータベース
 
 ## 🏗️ アーキテクチャ
@@ -30,19 +29,26 @@
 ```
 Internet
    |
-   | (Tailscale VPN)
+   | (Cloudflare Network)
    |
    v
-Nginx Proxy Manager (80, 443, 81)
+Cloudflare Tunnel (cloudflared)
    |
-   |-- NextCloud (80) --> PostgreSQL (5432)
-   |                  \
-   |                   \--> MinIO (9000, 9001)
+   |-- nextcloud.yourdomain.com --> NextCloud (80) --> PostgreSQL (5432)
+   |                                             \
+   |                                              \--> MinIO (9000)
    |
-   |-- Collabora Online (9980)
+   |-- collabora.yourdomain.com --> Collabora Online (9980)
    |
-   \-- MinIO Console (9001)
+   \-- minio.yourdomain.com --> MinIO Console (9001)
 ```
+
+**特徴:**
+- Cloudflare Tunnelが外部公開のエントリーポイント
+- 自動SSL/TLS証明書管理
+- DDoS保護とWAF（Cloudflareが提供）
+- IP制限やアクセスポリシーの設定が可能
+- VPN不要で安全にアクセス可能
 
 全てのサービスは同じ `cloud-storage` ネームスペースにデプロイされます。
 
@@ -58,14 +64,14 @@ Nginx Proxy Manager (80, 443, 81)
 - **kubectl**: Kubernetesコマンドラインツール
   - k3sインストール時に自動的に利用可能
 
-- **Tailscaleアカウント**: 
-  - https://tailscale.com でアカウント作成
-  - Auth Key取得: https://login.tailscale.com/admin/settings/keys
+- **Cloudflareアカウント**: 
+  - https://cloudflare.com でアカウント作成（無料プランで利用可能）
+  - ドメインをCloudflareに登録
+  - Zero Trustアカウントのセットアップ
 
-### オプション
+### 必須
 
-- **カスタムドメイン**: 公開アクセス用
-- **Let's Encrypt証明書**: HTTPS対応（Nginx Proxy Managerで設定可能）
+- **カスタムドメイン**: Cloudflareに登録したドメイン（必須）
 
 ## 🚀 クイックスタート
 
@@ -76,16 +82,17 @@ git clone <repository-url>
 cd MinIO_NextCloud_CollaboraOnline
 ```
 
-### 2. Tailscale Auth Keyの設定
+### 2. Cloudflare Tunnelの設定
 
-Tailscale管理画面からAuth Keyを取得し、`k8s/06-tailscale.yaml`を編集：
+Cloudflareダッシュボードでトンネルを作成し、トークンを取得します。
+詳細な手順は `docs/CLOUDFLARE_TUNNEL_SETUP.md` を参照してください。
 
 ```bash
-# Tailscale管理画面を開く
-open https://login.tailscale.com/admin/settings/keys
+# Cloudflareダッシュボードを開く
+open https://dash.cloudflare.com/
 
-# Auth Keyを取得後、ファイルを編集
-# k8s/06-tailscale.yaml の TS_AUTHKEY を実際のキーに置き換え
+# Zero Trust → Networks → Tunnels でトンネルを作成
+# トンネルトークンを取得後、k8s/06-cloudflare-tunnel.yaml の TUNNEL_TOKEN を置き換え
 ```
 
 ### 3. デプロイの実行
@@ -139,67 +146,25 @@ kubectl port-forward -n cloud-storage svc/collabora 9980:9980
    - バケット名: `nextcloud`
    - アクセス: Private
 
-### ステップ2: Nginx Proxy Managerの設定
+### ステップ2: Cloudflare Tunnelの設定
 
-1. 管理画面にアクセス（http://localhost:8081）
-2. 初期認証情報でログイン：
-   - Email: `admin@example.com`
-   - Password: `changeme`
-3. **重要**: 初回ログイン後、必ずパスワードを変更
+詳細な手順は `docs/CLOUDFLARE_TUNNEL_SETUP.md` を参照してください。
 
-4. プロキシホストの追加：
+**概要:**
 
-   **NextCloudのプロキシ設定:**
-   - Domain Names: `nextcloud.yourdomain.com`
-   - Scheme: `http`
-   - Forward Hostname/IP: `nextcloud.cloud-storage.svc.cluster.local`
-   - Forward Port: `80`
-   - WebSockets Support: ON
-   - Custom locations（追加）:
-     ```
-     location = /.well-known/carddav {
-       return 301 $scheme://$host/remote.php/dav;
-     }
-     location = /.well-known/caldav {
-       return 301 $scheme://$host/remote.php/dav;
-     }
-     ```
+1. Cloudflareダッシュボードでトンネルを作成
+2. Public Hostnameを設定：
+   - `nextcloud.yourdomain.com` → `http://nextcloud.cloud-storage.svc.cluster.local:80`
+   - `collabora.yourdomain.com` → `http://collabora.cloud-storage.svc.cluster.local:9980`
+   - `minio.yourdomain.com` → `http://minio.cloud-storage.svc.cluster.local:9001`
 
-   **Collabora Onlineのプロキシ設定:**
-   - Domain Names: `collabora.yourdomain.com`
-   - Scheme: `http`
-   - Forward Hostname/IP: `collabora.cloud-storage.svc.cluster.local`
-   - Forward Port: `9980`
-   - WebSockets Support: ON
+3. トンネルトークンを取得し、`k8s/06-cloudflare-tunnel.yaml`に設定
 
-   **MinIO Consoleのプロキシ設定:**
-   - Domain Names: `minio.yourdomain.com`
-   - Scheme: `http`
-   - Forward Hostname/IP: `minio.cloud-storage.svc.cluster.local`
-   - Forward Port: `9001`
+4. アクセスポリシーの設定（オプション）：
+   - Zero Trust → Access → Applications
+   - 特定のユーザーやIPアドレスのみアクセスを許可
 
-5. SSL証明書の設定（Let's Encrypt）:
-   - SSL Certificates タブ
-   - Add SSL Certificate
-   - Let's Encrypt を選択
-   - ドメイン名とメールアドレスを入力
-   - 各プロキシホストにSSL証明書を適用
-
-### ステップ3: Tailscaleの設定
-
-1. Tailscale管理画面にアクセス：https://login.tailscale.com/admin/machines
-
-2. k3sクラスタのマシンを確認し、Subnet Routerを承認：
-   - マシンの設定 > Edit route settings
-   - Subnet routes: `10.43.0.0/16` を承認
-
-3. 接続テスト：
-   ```bash
-   # Tailscaleクライアントから
-   curl http://<nginx-proxy-manager-service-ip>:81
-   ```
-
-### ステップ4: NextCloudの設定
+### ステップ3: NextCloudの設定
 
 1. NextCloudにアクセス（初回アクセス時に自動セットアップ）
 
@@ -211,8 +176,8 @@ kubectl port-forward -n cloud-storage svc/collabora 9980:9980
 3. **Collabora Onlineサーバーの設定:**
    - 設定 > Nextcloud Office (または Collabora Online)
    - "Use your own server" を選択
-   - URL: `http://collabora.cloud-storage.svc.cluster.local:9980`
-   - または Nginx Proxy Manager経由: `https://collabora.yourdomain.com`
+   - URL: `https://collabora.yourdomain.com`
+   - または内部アクセス: `http://collabora.cloud-storage.svc.cluster.local:9980`
 
 4. **信頼されたドメインの追加:**
    ```bash
@@ -228,6 +193,7 @@ kubectl port-forward -n cloud-storage svc/collabora 9980:9980
        0 => 'localhost',
        1 => 'nextcloud.yourdomain.com',
        2 => '*.cloud-storage.svc.cluster.local',
+       3 => '*.cfargotunnel.com',  # Cloudflare Tunnel用
      ),
    ```
 
@@ -235,6 +201,11 @@ kubectl port-forward -n cloud-storage svc/collabora 9980:9980
    - 設定 > 管理 > 追加のストレージ
    - Primary storage: Object Storage (S3)
    - 設定が正しく適用されていることを確認
+
+6. **Cloudflareプロキシ設定の最適化:**
+   - CloudflareダッシュボードでSSL/TLSモードを「Full」に設定
+   - WebSocketsを有効化
+   - 大きなファイルアップロード用にタイムアウトを調整
 
 ## 📊 各サービスの設定
 
@@ -331,35 +302,38 @@ env:
   value: "--o:ssl.enable=false --o:ssl.termination=true --o:child_root_path=/opt/lool/child-roots --o:mount_jail_tree=false --o:logging.level=warning --o:per_document.idle_timeout_secs=3600 --o:per_document.max_concurrency=4"
 ```
 
-### Tailscale設定
+### Cloudflare Tunnel設定
 
-**サブネットルーティング:**
+**環境変数:**
 
-`k8s/06-tailscale.yaml`で設定：
+`k8s/06-cloudflare-tunnel.yaml`で設定：
 
 ```yaml
 env:
-- name: TS_ROUTES
-  value: "10.43.0.0/16,10.42.0.0/16"  # Service CIDR + Pod CIDR
-- name: TS_EXTRA_ARGS
-  value: "--advertise-tags=tag:k8s --accept-routes"
+- name: TUNNEL_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: cloudflare-tunnel-token
+      key: TUNNEL_TOKEN
+- name: TUNNEL_METRICS
+  value: "0.0.0.0:2000"
+- name: TUNNEL_LOGLEVEL
+  value: "info"
 ```
 
-**ACL設定（Tailscale管理画面）:**
-```json
-{
-  "tagOwners": {
-    "tag:k8s": ["your-email@example.com"],
-  },
-  "acls": [
-    {
-      "action": "accept",
-      "src": ["*"],
-      "dst": ["tag:k8s:*"]
-    }
-  ]
-}
-```
+**アクセスポリシー（Cloudflareダッシュボード）:**
+
+Zero Trust → Access → Applications で設定：
+- Email認証
+- IP制限
+- 国別制限
+- デバイス認証（Cloudflare WARP使用時）
+
+**パフォーマンスチューニング:**
+- Cloudflareダッシュボード → Speed → Optimization
+- Auto Minify有効化
+- Brotli圧縮有効化
+- キャッシュルールの設定
 
 ## 🔍 監視とメンテナンス
 
@@ -587,8 +561,8 @@ kubectl delete pv <pv-name>
 - [MinIO Documentation](https://min.io/docs/minio/kubernetes/upstream/)
 - [NextCloud Documentation](https://docs.nextcloud.com/)
 - [Collabora Online Documentation](https://sdk.collaboraonline.com/)
-- [Nginx Proxy Manager](https://nginxproxymanager.com/)
-- [Tailscale Documentation](https://tailscale.com/kb/)
+- [Cloudflare Tunnel Documentation](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/)
+- [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
 - [k3s Documentation](https://docs.k3s.io/)
 
 ## 🤝 貢献
@@ -602,10 +576,11 @@ MIT License
 ## 🔐 セキュリティに関する注意
 
 - 本番環境では必ず全てのデフォルトパスワードを変更してください
-- SSL/TLS証明書を使用してください
+- Cloudflare Tunnelは自動的にSSL/TLS証明書を管理します
 - 定期的なバックアップを実施してください
 - セキュリティアップデートを適用してください
-- Tailscale ACLを適切に設定してください
+- Cloudflare Zero Trustアクセスポリシーを適切に設定してください
+- Cloudflare WAFでセキュリティルールを設定することを推奨
 
 ## ⚙️ カスタマイズ
 

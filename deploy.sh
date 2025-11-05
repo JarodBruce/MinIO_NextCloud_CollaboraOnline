@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # k3sクラウドストレージ環境デプロイスクリプト
-# MinIO + NextCloud + Collabora Online + Nginx Proxy Manager + Tailscale
+# MinIO + NextCloud + Collabora Online + Cloudflare Tunnel
 
 set -e
 
@@ -78,31 +78,31 @@ check_kubectl() {
     log_success "kubectl設定OK"
 }
 
-# Tailscale Auth Keyの確認
-check_tailscale_auth() {
-    log_info "Tailscale認証キーを確認中..."
+# Cloudflare Tunnel Tokenの確認
+check_cloudflare_token() {
+    log_info "Cloudflare Tunnel Tokenを確認中..."
     
-    if grep -q "tskey-auth-XXXXXXXXXX" k8s/06-tailscale.yaml; then
-        log_warning "Tailscale Auth Keyが設定されていません"
-        log_info "Tailscale管理画面からAuth Keyを取得してください:"
-        log_info "https://login.tailscale.com/admin/settings/keys"
+    if grep -q "eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==" k8s/06-cloudflare-tunnel.yaml; then
+        log_warning "Cloudflare Tunnel Tokenが設定されていません"
+        log_info "Cloudflareダッシュボードからトンネルトークンを取得してください:"
+        log_info "https://dash.cloudflare.com/ → Zero Trust → Networks → Tunnels"
         log_info ""
-        log_info "Auth Keyを入力してください (スキップする場合はEnter):"
-        read -r ts_authkey
+        log_info "Tunnel Tokenを入力してください (スキップする場合はEnter):"
+        read -r cf_token
         
-        if [[ -n "$ts_authkey" ]]; then
+        if [[ -n "$cf_token" ]]; then
             # macOSとLinuxの両方で動作するsed
             if [[ "$OSTYPE" == "darwin"* ]]; then
-                sed -i '' "s|tskey-auth-XXXXXXXXXX-XXXXXXXXXXXXXXXXXXXX|${ts_authkey}|g" k8s/06-tailscale.yaml
+                sed -i '' "s|eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==|${cf_token}|g" k8s/06-cloudflare-tunnel.yaml
             else
-                sed -i "s|tskey-auth-XXXXXXXXXX-XXXXXXXXXXXXXXXXXXXX|${ts_authkey}|g" k8s/06-tailscale.yaml
+                sed -i "s|eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==|${cf_token}|g" k8s/06-cloudflare-tunnel.yaml
             fi
-            log_success "Tailscale Auth Keyを設定しました"
+            log_success "Cloudflare Tunnel Tokenを設定しました"
         else
-            log_warning "Tailscaleの設定をスキップします（後で手動で設定してください）"
+            log_warning "Cloudflare Tunnelの設定をスキップします（後で手動で設定してください）"
         fi
     else
-        log_success "Tailscale Auth Keyは設定済みです"
+        log_success "Cloudflare Tunnel Tokenは設定済みです"
     fi
 }
 
@@ -117,8 +117,7 @@ apply_manifests() {
         "02-minio.yaml"
         "03-nextcloud.yaml"
         "04-collabora.yaml"
-        "05-nginx-proxy-manager.yaml"
-        "06-tailscale.yaml"
+        "06-cloudflare-tunnel.yaml"
     )
     
     for manifest in "${manifests[@]}"; do
@@ -139,7 +138,7 @@ wait_for_deployments() {
         "nextcloud-db"
         "nextcloud"
         "collabora"
-        "nginx-proxy-manager"
+        "cloudflare-tunnel"
     )
     
     for deployment in "${deployments[@]}"; do
@@ -196,14 +195,8 @@ show_status() {
    kubectl port-forward -n cloud-storage svc/collabora 9980:9980
    ブラウザ: http://localhost:9980
 
-4. Nginx Proxy Manager:
-   kubectl port-forward -n cloud-storage svc/nginx-proxy-manager 8081:81
-   ブラウザ: http://localhost:8081
-   初期ユーザー名: admin@example.com
-   初期パスワード: changeme
-
-5. Tailscaleの状態確認:
-   kubectl logs -n cloud-storage -l app=tailscale-subnet-router
+4. Cloudflare Tunnelの状態確認:
+   kubectl logs -n cloud-storage -l app=cloudflare-tunnel
 
 ========================================
 次のステップ:
@@ -213,21 +206,19 @@ show_status() {
    - MinIO Consoleにログイン
    - 'nextcloud' という名前のバケットを作成
 
-2. Nginx Proxy Managerの設定
-   - 管理画面にログイン後、パスワードを変更
-   - 各サービスのプロキシホストを設定
+2. Cloudflare Tunnelの設定
+   - Cloudflareダッシュボードでトンネルを作成
+   - Public Hostnameを設定して各サービスをルーティング
+   - 詳細: docs/CLOUDFLARE_TUNNEL_SETUP.md を参照
 
-3. Tailscaleの設定
-   - Tailscale管理画面でサブネットルーターを承認
-   - https://login.tailscale.com/admin/machines
-
-4. NextCloudの設定
+3. NextCloudの設定
    - 初回アクセス時に管理者アカウントでログイン
    - Collabora Onlineアプリをインストール
    - 設定 > Collabora Online > サーバーURLを設定
+   - Cloudflareドメインを信頼されたドメインに追加
 
-5. SSL証明書の設定（オプション）
-   - Nginx Proxy ManagerでLet's Encrypt証明書を取得
+4. Collabora OnlineのWOPI設定
+   - NextCloudのドメインをCollabora側で許可
 
 ========================================
 EOF
@@ -242,8 +233,8 @@ main() {
     check_k3s
     check_kubectl
     
-    # Tailscale設定確認
-    check_tailscale_auth
+    # Cloudflare Tunnel設定確認
+    check_cloudflare_token
     
     # デプロイ開始確認
     log_warning "デプロイを開始しますか? (y/n)"

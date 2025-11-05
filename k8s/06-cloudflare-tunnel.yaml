@@ -1,0 +1,96 @@
+---
+# Cloudflare Tunnel Secret (要設定: 実際のトンネルトークンを設定してください)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-tunnel-token
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  # Cloudflareダッシュボードから取得したトンネルトークンを設定
+  # https://dash.cloudflare.com/ → Zero Trust → Networks → Tunnels
+  TUNNEL_TOKEN: "eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ=="
+
+---
+# Cloudflare Tunnel Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflare-tunnel
+  namespace: cloud-storage
+  labels:
+    app: cloudflare-tunnel
+spec:
+  replicas: 2  # 高可用性のため2つのレプリカ
+  selector:
+    matchLabels:
+      app: cloudflare-tunnel
+  template:
+    metadata:
+      labels:
+        app: cloudflare-tunnel
+    spec:
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:latest
+        args:
+        - tunnel
+        - --no-autoupdate
+        - run
+        - --token
+        - $(TUNNEL_TOKEN)
+        env:
+        - name: TUNNEL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cloudflare-tunnel-token
+              key: TUNNEL_TOKEN
+        - name: TUNNEL_METRICS
+          value: "0.0.0.0:2000"
+        - name: TUNNEL_LOGLEVEL
+          value: "info"
+        ports:
+        - containerPort: 2000
+          name: metrics
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: 2000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 2000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+
+---
+# Cloudflare Tunnel Service (メトリクス用)
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflare-tunnel-metrics
+  namespace: cloud-storage
+  labels:
+    app: cloudflare-tunnel
+spec:
+  type: ClusterIP
+  ports:
+  - port: 2000
+    targetPort: 2000
+    name: metrics
+  selector:
+    app: cloudflare-tunnel
