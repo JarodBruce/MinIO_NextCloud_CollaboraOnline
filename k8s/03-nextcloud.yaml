@@ -142,6 +142,21 @@ data:
   OBJECTSTORE_S3_PORT: "9000"
   OBJECTSTORE_S3_SSL: "false"
   OBJECTSTORE_S3_USEPATH_STYLE: "true"
+  NEXTCLOUD_ADMIN_USER: "admin"
+  NEXTCLOUD_ADMIN_PASSWORD: "admin123"
+  NEXTCLOUD_DATA_DIR: "/var/www/html/data"
+  NEXTCLOUD_DB_TYPE: "pgsql"
+  NEXTCLOUD_VERSION: "32.0.1.2"
+  NEXTCLOUD_OVERWRITE_CLI_URL: "https://nextcloud.jarodbruce.f5.si"
+  NEXTCLOUD_TRUSTED_PROXIES: "10.0.0.0/8"
+  NEXTCLOUD_OVERWRITE_PROTOCOL: "https"
+  NEXTCLOUD_DB_NAME: "nextcloud"
+  NEXTCLOUD_DB_HOST: "nextcloud-db"
+  NEXTCLOUD_DB_TABLE_PREFIX: "oc_"
+  NEXTCLOUD_DB_USER: "oc_admin"
+  NEXTCLOUD_DB_PASSWORD: "24peVtRPIwux0nu0hvQ5ORZy7l51cb"
+  NEXTCLOUD_INSTALLED: "true"
+  NEXTCLOUD_INSTANCE_ID: "ocvl8j7mbg9s"
 
 ---
 # NextCloud Deployment
@@ -245,6 +260,71 @@ spec:
             secretKeyRef:
               name: minio-secret
               key: rootPassword
+        - name: NEXTCLOUD_DATA_DIR
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DATA_DIR
+        - name: NEXTCLOUD_DB_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_TYPE
+        - name: NEXTCLOUD_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_VERSION
+        - name: NEXTCLOUD_OVERWRITE_CLI_URL
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_OVERWRITE_CLI_URL
+        - name: NEXTCLOUD_TRUSTED_PROXIES
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_TRUSTED_PROXIES
+        - name: NEXTCLOUD_OVERWRITE_PROTOCOL
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_OVERWRITE_PROTOCOL
+        - name: NEXTCLOUD_DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_NAME
+        - name: NEXTCLOUD_DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_HOST
+        - name: NEXTCLOUD_DB_TABLE_PREFIX
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_TABLE_PREFIX
+        - name: NEXTCLOUD_DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_USER
+        - name: NEXTCLOUD_DB_PASSWORD
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_DB_PASSWORD
+        - name: NEXTCLOUD_INSTALLED
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_INSTALLED
+        - name: NEXTCLOUD_INSTANCE_ID
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: NEXTCLOUD_INSTANCE_ID
         ports:
         - containerPort: 80
         volumeMounts:
