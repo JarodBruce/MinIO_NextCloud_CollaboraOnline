@@ -176,11 +176,11 @@ spec:
           name: redis
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "256Mi"
+            cpu: "200m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "1Gi"
+            cpu: "1000m"
         livenessProbe:
           tcpSocket:
             port: 6379
@@ -236,6 +236,9 @@ spec:
       - name: wait-for-redis
         image: busybox:1.36
         command: ['sh', '-c', 'until nc -z immich-redis 6379; do echo waiting for redis; sleep 2; done;']
+      - name: wait-for-ml
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z immich-machine-learning 3003; do echo waiting for machine learning; sleep 2; done;']
       - name: init-storage
         image: busybox:1.36
         command:
@@ -244,7 +247,7 @@ spec:
         - |
           mkdir -p /data/upload /data/library /data/thumbs /data/profile /data/encoded-video /data/backups
           touch /data/upload/.immich /data/library/.immich /data/thumbs/.immich /data/profile/.immich /data/encoded-video/.immich /data/backups/.immich
-          echo "Storage folders initialized"
+          echo "Local cache folders initialized (media will be stored in S3)"
         volumeMounts:
         - name: immich-data
           mountPath: /data
@@ -285,9 +288,19 @@ spec:
         # Cloudflare Access対応
         - name: IMMICH_TRUSTED_PROXIES
           value: "10.42.0.0/16,10.43.0.0/16,10.0.0.0/8,173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22"
-        # S3/MinIO設定
+        - name: IMMICH_PORT
+          value: "3001"
+        # ローカルストレージパス（一時的なキャッシュ用）
+        - name: IMMICH_MEDIA_LOCATION
+          value: "/data"
+        # S3/MinIO設定 - メディアファイルをS3に保存
         - name: IMMICH_STORAGE_S3_ENABLED
           value: "true"
+        - name: IMMICH_STORAGE_S3_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: S3_ENDPOINT
         - name: IMMICH_STORAGE_S3_ACCESS_KEY
           valueFrom:
             secretKeyRef:
@@ -298,11 +311,6 @@ spec:
             secretKeyRef:
               name: immich-s3-secret
               key: AWS_SECRET_ACCESS_KEY
-        - name: IMMICH_STORAGE_S3_ENDPOINT
-          valueFrom:
-            secretKeyRef:
-              name: immich-s3-secret
-              key: S3_ENDPOINT
         - name: IMMICH_STORAGE_S3_BUCKET
           valueFrom:
             secretKeyRef:
@@ -315,8 +323,12 @@ spec:
               key: S3_REGION
         - name: IMMICH_STORAGE_S3_FORCE_PATH_STYLE
           value: "true"
-        - name: IMMICH_PORT
-          value: "3001"
+        # Machine Learning service URL
+        - name: IMMICH_MACHINE_LEARNING_URL
+          value: "http://immich-machine-learning:3003"
+        # Storage template configuration
+        - name: IMMICH_CONFIG_FILE
+          value: ""
         ports:
         - containerPort: 3001
           name: http
@@ -325,10 +337,10 @@ spec:
           mountPath: /data
         resources:
           requests:
-            memory: "512Mi"
-            cpu: "250m"
+            memory: "1468Mi"
+            cpu: "1000m"
           limits:
-            memory: "2Gi"
+            memory: "3Gi"
             cpu: "2000m"
         livenessProbe:
           httpGet:
@@ -358,7 +370,7 @@ metadata:
   labels:
     app: immich-machine-learning
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       app: immich-machine-learning
@@ -396,6 +408,15 @@ spec:
             secretKeyRef:
               name: immich-secret
               key: REDIS_HOSTNAME
+        - name: MACHINE_LEARNING_PORT
+          value: "3003"
+        # RAW画像処理のサポート
+        - name: TRANSFORMERS_CACHE
+          value: "/cache"
+        - name: MACHINE_LEARNING_WORKERS
+          value: "2"
+        - name: MACHINE_LEARNING_WORKER_TIMEOUT
+          value: "120"
         ports:
         - containerPort: 3003
           name: http
@@ -404,11 +425,25 @@ spec:
           mountPath: /cache
         resources:
           requests:
-            memory: "1Gi"
-            cpu: "500m"
+            memory: "512Mi"
+            cpu: "250m"
           limits:
-            memory: "4Gi"
-            cpu: "2000m"
+            memory: "3Gi"
+            cpu: "1500m"
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: 3003
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: 3003
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
       volumes:
       - name: model-cache
         emptyDir: {}
@@ -424,6 +459,10 @@ metadata:
     app: immich-server
 spec:
   type: ClusterIP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
   ports:
   - port: 3001
     targetPort: 3001
