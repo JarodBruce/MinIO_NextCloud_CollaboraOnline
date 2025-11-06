@@ -1,22 +1,18 @@
-.git/
-.DS_Store
-*.swp
-*.swo
-*~
+# 環境変数ファイル
+.env
+
+# IDEとエディタ
 .vscode/
 .idea/
 
-# セキュリティ: 実際のTailscale Auth Keyを含むファイルは除外
-k8s/06-tailscale-custom.yaml
-
-# バックアップファイル
-*.backup
-*.bak
-backup/
+# OS固有のファイル
+.DS_Store
+Thumbs.db
 
 # ログファイル
 *.log
 
 # 一時ファイル
-tmp/
-temp/
+*.tmp
+*.swp
+*~

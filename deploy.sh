@@ -12,6 +12,17 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# .envファイルの読み込み
+if [ -f .env ]; then
+    log_info ".envファイルを読み込み中..." 2>/dev/null || echo "[INFO] .envファイルを読み込み中..."
+    export $(cat .env | grep -v '^#' | xargs)
+else
+    echo -e "${YELLOW}[WARNING]${NC} .envファイルが見つかりません"
+    echo -e "${BLUE}[INFO]${NC} .env.exampleをコピーして.envを作成してください"
+    echo -e "${BLUE}[INFO]${NC} cp .env.example .env"
+    exit 1
+fi
+
 # ロギング関数
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -78,32 +89,32 @@ check_kubectl() {
     log_success "kubectl設定OK"
 }
 
-# Cloudflare Tunnel Tokenの確認
+# Cloudflare Tunnel Tokenの確認と適用
 check_cloudflare_token() {
     log_info "Cloudflare Tunnel Tokenを確認中..."
     
-    if grep -q "eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==" k8s/06-cloudflare-tunnel.yaml; then
+    if [[ -z "$TUNNEL_TOKEN" ]] || [[ "$TUNNEL_TOKEN" == "your_cloudflare_tunnel_token_here" ]]; then
         log_warning "Cloudflare Tunnel Tokenが設定されていません"
         log_info "Cloudflareダッシュボードからトンネルトークンを取得してください:"
         log_info "https://dash.cloudflare.com/ → Zero Trust → Networks → Tunnels"
         log_info ""
-        log_info "Tunnel Tokenを入力してください (スキップする場合はEnter):"
-        read -r cf_token
-        
-        if [[ -n "$cf_token" ]]; then
-            # macOSとLinuxの両方で動作するsed
-            if [[ "$OSTYPE" == "darwin"* ]]; then
-                sed -i '' "s|eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==|${cf_token}|g" k8s/06-cloudflare-tunnel.yaml
-            else
-                sed -i "s|eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ==|${cf_token}|g" k8s/06-cloudflare-tunnel.yaml
-            fi
-            log_success "Cloudflare Tunnel Tokenを設定しました"
-        else
-            log_warning "Cloudflare Tunnelの設定をスキップします（後で手動で設定してください）"
+        log_info ".envファイルにTUNNEL_TOKENを設定してください"
+        log_warning "Cloudflare Tunnelの設定をスキップしますか? (y/n)"
+        read -r answer
+        if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+            error_exit "Cloudflare Tunnel Tokenを設定してから再実行してください"
         fi
-    else
-        log_success "Cloudflare Tunnel Tokenは設定済みです"
+        return
     fi
+    
+    # Secretを動的に作成
+    log_info "Cloudflare Tunnel Secretを作成中..."
+    kubectl create secret generic cloudflare-tunnel-token \
+        --from-literal=TUNNEL_TOKEN="$TUNNEL_TOKEN" \
+        -n cloud-storage \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    log_success "Cloudflare Tunnel Tokenを設定しました"
 }
 
 # マニフェストの適用
@@ -233,9 +244,6 @@ main() {
     check_k3s
     check_kubectl
     
-    # Cloudflare Tunnel設定確認
-    check_cloudflare_token
-    
     # デプロイ開始確認
     log_warning "デプロイを開始しますか? (y/n)"
     read -r answer
@@ -243,6 +251,9 @@ main() {
         log_info "デプロイをキャンセルしました"
         exit 0
     fi
+    
+    # Cloudflare Tunnel設定確認と適用
+    check_cloudflare_token
     
     # マニフェスト適用
     apply_manifests

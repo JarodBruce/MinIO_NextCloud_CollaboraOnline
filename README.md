@@ -113,33 +113,40 @@ git clone https://github.com/JarodBruce/MinIO_NextCloud_CollaboraOnline.git
 cd MinIO_NextCloud_CollaboraOnline
 ```
 
-### ステップ2: Cloudflare Tunnelの作成
+### ステップ2: 環境変数の設定
 
-1. **Cloudflareダッシュボードにログイン**
+1. **`.env`ファイルを作成**
+   ```bash
+   # .env.exampleをコピー
+   cp .env.example .env
+   ```
+
+2. **Cloudflareダッシュボードにログイン**
    ```bash
    # ブラウザで以下のURLを開く
    https://one.dash.cloudflare.com/
    ```
 
-2. **トンネルを作成**
+3. **トンネルを作成**
    - `Zero Trust` > `Networks` > `Tunnels` に移動
    - `Create a tunnel` をクリック
    - トンネル名を入力（例: `k3s-cloud-storage`）
    - `Cloudflared` を選択して `Save tunnel` をクリック
 
-3. **トンネルトークンをコピー**
+4. **トンネルトークンをコピー**
    - トンネル作成後に表示される **トークン** をコピー
    - または、`Install and run a connector` セクションのDocker実行コマンドから `--token` の後の文字列をコピー
 
-4. **トークンを設定ファイルに追加**
+5. **トークンを`.env`ファイルに設定**
    ```bash
-   # k8s/06-cloudflare-tunnel.yaml を編集
-   nano k8s/06-cloudflare-tunnel.yaml
+   # .envファイルを編集
+   nano .env
    
-   # 以下の YOUR_TUNNEL_TOKEN_HERE を実際のトークンに置き換え
-   # data:
-   #   TUNNEL_TOKEN: "YOUR_TUNNEL_TOKEN_HERE"
+   # TUNNEL_TOKENの値を実際のトークンに置き換え
+   TUNNEL_TOKEN=eyJhIjoiXXXXXXXXXXX...
    ```
+
+   **重要**: `.env`ファイルは`.gitignore`に含まれているため、GitHubにプッシュされません。
 
 ### ステップ3: Public Hostnameの設定
 
@@ -154,6 +161,8 @@ Cloudflareダッシュボードのトンネル設定で、以下のPublic Hostna
 **注意**: `yourdomain.com` を実際のドメインに置き換えてください。
 
 ### ステップ4: デプロイの実行
+
+**重要**: デプロイ前に`.env`ファイルに`TUNNEL_TOKEN`が設定されていることを確認してください。
 
 ```bash
 # デプロイスクリプトに実行権限を付与
@@ -1037,9 +1046,21 @@ k3s自体も削除する場合：
 sudo rm -rf /var/lib/rancher/k3s
 ```
 
-## � セキュリティのベストプラクティス
+## 📈 セキュリティのベストプラクティス
 
 ### 本番環境での推奨設定
+
+#### 0. 環境変数ファイルの管理（最重要）
+
+**`.env`ファイルの保護:**
+- `.env`ファイルは絶対にGitHubにプッシュしないこと（`.gitignore`で除外済み）
+- サーバー上で適切な権限を設定：
+  ```bash
+  chmod 600 .env
+  chown root:root .env
+  ```
+- `.env.example`をテンプレートとして使用し、実際の値は含めない
+- 本番環境では環境変数管理ツール（Vault、Sealed Secretsなど）の使用を推奨
 
 #### 1. デフォルトパスワードの変更（必須）
 

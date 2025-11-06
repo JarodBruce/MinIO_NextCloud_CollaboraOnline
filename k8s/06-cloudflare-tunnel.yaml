@@ -1,15 +1,10 @@
 ---
-# Cloudflare Tunnel Secret (要設定: 実際のトンネルトークンを設定してください)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cloudflare-tunnel-token
-  namespace: cloud-storage
-type: Opaque
-stringData:
-  # Cloudflareダッシュボードから取得したトンネルトークンを設定
-  # https://dash.cloudflare.com/ → Zero Trust → Networks → Tunnels
-  TUNNEL_TOKEN: "eyJhIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYIiwidCI6IlhYWFhYWFhYLVhYWFgtWFhYWC1YWFHYWC1YWFhYWFhYWFhYWFgiLCJzIjoiWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFgifQ=="
+# Cloudflare Tunnel Secret
+# 注意: このSecretはdeploy.shスクリプトによって.envファイルから自動生成されます
+# 手動で適用する場合は、以下のコマンドを使用してください:
+# source .env && kubectl create secret generic cloudflare-tunnel-token \
+#   --from-literal=TUNNEL_TOKEN="$TUNNEL_TOKEN" \
+#   -n cloud-storage --dry-run=client -o yaml | kubectl apply -f -
 
 ---
 # Cloudflare Tunnel Deployment
