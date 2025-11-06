@@ -135,28 +135,24 @@ metadata:
 data:
   POSTGRES_HOST: "nextcloud-db"
   POSTGRES_DB: "nextcloud"
-  NEXTCLOUD_TRUSTED_DOMAINS: "nextcloud.local localhost"
+  NEXTCLOUD_TRUSTED_DOMAINS: "localhost nextcloud.jarodbruce.f5.si nextcloud.cloud-storage.svc.cluster.local *.cloud-storage.svc.cluster.local"
   OBJECTSTORE_S3_BUCKET: "nextcloud"
   OBJECTSTORE_S3_REGION: "us-east-1"
   OBJECTSTORE_S3_HOST: "minio.cloud-storage.svc.cluster.local"
   OBJECTSTORE_S3_PORT: "9000"
   OBJECTSTORE_S3_SSL: "false"
   OBJECTSTORE_S3_USEPATH_STYLE: "true"
-  NEXTCLOUD_ADMIN_USER: "admin"
-  NEXTCLOUD_ADMIN_PASSWORD: "admin123"
-  NEXTCLOUD_DATA_DIR: "/var/www/html/data"
-  NEXTCLOUD_DB_TYPE: "pgsql"
-  NEXTCLOUD_VERSION: "32.0.1.2"
-  NEXTCLOUD_OVERWRITE_CLI_URL: "https://nextcloud.jarodbruce.f5.si"
-  NEXTCLOUD_TRUSTED_PROXIES: "10.0.0.0/8"
-  NEXTCLOUD_OVERWRITE_PROTOCOL: "https"
-  NEXTCLOUD_DB_NAME: "nextcloud"
-  NEXTCLOUD_DB_HOST: "nextcloud-db"
-  NEXTCLOUD_DB_TABLE_PREFIX: "oc_"
-  NEXTCLOUD_DB_USER: "oc_admin"
-  NEXTCLOUD_DB_PASSWORD: "24peVtRPIwux0nu0hvQ5ORZy7l51cb"
-  NEXTCLOUD_INSTALLED: "true"
-  NEXTCLOUD_INSTANCE_ID: "ocvl8j7mbg9s"
+  OBJECTSTORE_S3_AUTOCREATE: "true"
+  OBJECTSTORE_S3_OBJECT_PREFIX: "urn:oid:"
+  OVERWRITEPROTOCOL: "https"
+  OVERWRITECLIURL: "https://nextcloud.jarodbruce.f5.si"
+  OVERWRITEHOST: "nextcloud.jarodbruce.f5.si"
+  TRUSTED_PROXIES: "10.42.0.0/16 10.43.0.0/16 10.0.0.0/8"
+  APACHE_DISABLE_REWRITE_IP: "1"
+  # Collabora Online 設定
+  COLLABORA_WOPI_URL: "http://collabora.jarodbruce.f5.si"
+  COLLABORA_PUBLIC_WOPI_URL: "https://collabora.jarodbruce.f5.si"
+  COLLABORA_WOPI_CALLBACK_URL: "http://nextcloud.cloud-storage.svc.cluster.local"
 
 ---
 # NextCloud Deployment
@@ -220,6 +216,41 @@ spec:
             configMapKeyRef:
               name: nextcloud-config
               key: NEXTCLOUD_TRUSTED_DOMAINS
+        - name: OVERWRITEPROTOCOL
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OVERWRITEPROTOCOL
+        - name: OVERWRITECLIURL
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OVERWRITECLIURL
+        - name: TRUSTED_PROXIES
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: TRUSTED_PROXIES
+        - name: APACHE_DISABLE_REWRITE_IP
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: APACHE_DISABLE_REWRITE_IP
+        - name: OVERWRITEHOST
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OVERWRITEHOST
+        - name: OBJECTSTORE_S3_AUTOCREATE
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_AUTOCREATE
+        - name: OBJECTSTORE_S3_OBJECT_PREFIX
+          valueFrom:
+            configMapKeyRef:
+              name: nextcloud-config
+              key: OBJECTSTORE_S3_OBJECT_PREFIX
         - name: OBJECTSTORE_S3_BUCKET
           valueFrom:
             configMapKeyRef:
@@ -260,71 +291,6 @@ spec:
             secretKeyRef:
               name: minio-secret
               key: rootPassword
-        - name: NEXTCLOUD_DATA_DIR
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DATA_DIR
-        - name: NEXTCLOUD_DB_TYPE
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_TYPE
-        - name: NEXTCLOUD_VERSION
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_VERSION
-        - name: NEXTCLOUD_OVERWRITE_CLI_URL
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_OVERWRITE_CLI_URL
-        - name: NEXTCLOUD_TRUSTED_PROXIES
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_TRUSTED_PROXIES
-        - name: NEXTCLOUD_OVERWRITE_PROTOCOL
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_OVERWRITE_PROTOCOL
-        - name: NEXTCLOUD_DB_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_NAME
-        - name: NEXTCLOUD_DB_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_HOST
-        - name: NEXTCLOUD_DB_TABLE_PREFIX
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_TABLE_PREFIX
-        - name: NEXTCLOUD_DB_USER
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_USER
-        - name: NEXTCLOUD_DB_PASSWORD
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_DB_PASSWORD
-        - name: NEXTCLOUD_INSTALLED
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_INSTALLED
-        - name: NEXTCLOUD_INSTANCE_ID
-          valueFrom:
-            configMapKeyRef:
-              name: nextcloud-config
-              key: NEXTCLOUD_INSTANCE_ID
         ports:
         - containerPort: 80
         volumeMounts:

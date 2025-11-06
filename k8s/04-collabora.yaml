@@ -6,10 +6,10 @@ metadata:
   name: collabora-config
   namespace: cloud-storage
 data:
-  domain: "nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
+  domain: "nextcloud\\.jarodbruce\\.f5\\.si|nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
   username: "admin"
   password: "admin123"
-  extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.host[0]=nextcloud.cloud-storage.svc.cluster.local --o:storage.wopi.host[1]=nextcloud.jarodbruce.f5.si"
 
 ---
 # Collabora Proof Key Secret (generate with: ssh-keygen -t rsa -N "" -m PEM -f proof_key)
@@ -87,9 +87,13 @@ spec:
       
       volumes:
       - name: cool-tmp
-        emptyDir: {}
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
       - name: cool-child-roots
-        emptyDir: {}
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
       - name: proof-key
         secret:
           secretName: collabora-proof-key
