@@ -18,10 +18,12 @@ Cloudflare Tunnelを使用してk3s上にセキュアなクラウドストレー
 
 このプロジェクトは、以下のコンポーネントで構成される完全なクラウドストレージソリューションです：
 
-- **MinIO** - S3互換オブジェクトストレージ（NextCloudのバックエンド）
+- **MinIO** - S3互換オブジェクトストレージ（NextCloud・Immichのバックエンド）
 - **NextCloud** - Webベースのファイル共有・同期プラットフォーム
 - **Collabora Online** - オンラインOfficeスイート（Word/Excel/PowerPoint編集）
-- **PostgreSQL** - NextCloudデータベース
+- **Immich** - セルフホスト型写真・動画管理プラットフォーム（Google Photos代替）
+- **PostgreSQL** - NextCloud・Immichデータベース
+- **Redis** - Immichキャッシュ
 - **Cloudflare Tunnel** - セキュアな外部アクセス（ゼロトラストアーキテクチャ）
 
 ## 🏗️ アーキテクチャ
@@ -157,6 +159,7 @@ Cloudflareダッシュボードのトンネル設定で、以下のPublic Hostna
 | `nextcloud.yourdomain.com` | `http://nextcloud.cloud-storage.svc.cluster.local:80` | HTTP |
 | `collabora.yourdomain.com` | `http://collabora.cloud-storage.svc.cluster.local:9980` | HTTP |
 | `minio.yourdomain.com` | `http://minio.cloud-storage.svc.cluster.local:9001` | HTTP |
+| `immich.yourdomain.com` | `http://immich-server.cloud-storage.svc.cluster.local:3001` | HTTP |
 
 **注意**: `yourdomain.com` を実際のドメインに置き換えてください。
 
@@ -198,6 +201,10 @@ chmod +x deploy.sh status.sh cleanup.sh port-forward.sh
 - **MinIO Console**: `https://minio.yourdomain.com`
   - ユーザー名: `minioadmin`
   - パスワード: `minioadmin123`
+
+- **Immich**: `https://immich.yourdomain.com`
+  - 初回アクセス時に管理者アカウントを作成します
+  - 写真・動画を自動的にMinIO(S3)に保存します
 
 #### ローカルアクセス（ポートフォワード）
 
@@ -297,6 +304,14 @@ Cloudflareダッシュボードで、トンネルの `Public Hostname` タブを
 - **Service**: 
   - Type: `HTTP`
   - URL: `minio.cloud-storage.svc.cluster.local:9001`
+
+#### Immich
+
+- **Subdomain**: `immich`
+- **Domain**: `yourdomain.com`
+- **Service**: 
+  - Type: `HTTP`
+  - URL: `immich-server.cloud-storage.svc.cluster.local:3001`
 
 ### 5. 追加設定（オプション）
 
@@ -478,6 +493,152 @@ domain: "nextcloud\\.yourdomain\\.com|nextcloud\\.otherdomain\\.com"
 env:
 - name: dictionaries
   value: "en_US ja"
+```
+
+### Immichの設定
+
+Immichは自己ホスト型の写真・動画管理プラットフォームで、Google Photosの代替として人気です。
+
+#### 初期セットアップ
+
+1. **Immichへアクセス**
+   - `https://immich.yourdomain.com` を開く
+
+2. **管理者アカウントの作成**
+   - メールアドレスとパスワードを入力
+   - 「サインアップ」をクリック
+
+3. **MinIOバケットの作成**
+   
+   Immichが使用するS3バケットを作成します：
+   
+   ```bash
+   # MinIO Podに入る
+   kubectl exec -it -n cloud-storage deployment/minio -- sh
+   
+   # MinIO Clientを設定
+   mc alias set local http://localhost:9000 minioadmin minioadmin123
+   
+   # immichバケットを作成
+   mc mb local/immich
+   
+   # バケットポリシーを設定（プライベート）
+   mc anonymous set none local/immich
+   ```
+
+4. **ストレージ設定の確認**
+   
+   Immichは自動的にMinIO(S3)を使用するように設定されています：
+   - エンドポイント: `http://minio:9000`
+   - バケット名: `immich`
+   - リージョン: `us-east-1`
+
+#### モバイルアプリの設定
+
+1. **アプリのインストール**
+   - iOS: [App Store](https://apps.apple.com/app/immich/id1613945652)
+   - Android: [Google Play](https://play.google.com/store/apps/details?id=app.alextran.immich)
+
+2. **サーバー接続**
+   - サーバーURL: `https://immich.yourdomain.com`
+   - ログイン情報を入力
+
+3. **自動バックアップの設定**
+   - アプリ設定で「自動バックアップ」を有効化
+   - バックアップするアルバムを選択
+
+#### 機能
+
+- ✅ **顔認識** - 機械学習による自動顔認識
+- ✅ **オブジェクト検出** - 写真内のオブジェクトを自動タグ付け
+- ✅ **位置情報** - GPSデータから地図上に表示
+- ✅ **アルバム共有** - 家族や友人とアルバムを共有
+- ✅ **ライブ写真** - iOSのLive Photosをサポート
+- ✅ **RAW画像** - プロ向けRAWフォーマットに対応
+- ✅ **動画変換** - 効率的なストリーミング用に変換
+
+#### パフォーマンスの最適化
+
+**Machine Learningリソースの調整:**
+
+大量の写真を処理する場合、ML用のリソースを増やします：
+
+```yaml
+# k8s/05-immich.yaml
+resources:
+  requests:
+    memory: "2Gi"
+    cpu: "1000m"
+  limits:
+    memory: "8Gi"
+    cpu: "4000m"
+```
+
+**Redis接続の確認:**
+
+```bash
+# Redisへの接続テスト
+kubectl exec -n cloud-storage deployment/immich-server -- \
+  redis-cli -h immich-redis ping
+```
+
+#### バックアップ
+
+**データベースバックアップ:**
+
+```bash
+# Immich PostgreSQLをバックアップ
+kubectl exec -n cloud-storage deployment/immich-postgres -- \
+  pg_dump -U immich immich > immich-db-$(date +%Y%m%d).sql
+
+# 復元
+cat immich-db-20250115.sql | \
+  kubectl exec -i -n cloud-storage deployment/immich-postgres -- \
+  psql -U immich immich
+```
+
+**写真・動画のバックアップ:**
+
+すべてのメディアはMinIOに保存されているため、MinIOのバックアップで対応：
+
+```bash
+# MinIO Clientでバックアップ
+kubectl exec -n cloud-storage deployment/minio -- \
+  mc mirror local/immich /backup/immich-$(date +%Y%m%d)
+```
+
+#### トラブルシューティング
+
+**機械学習が動作しない:**
+
+```bash
+# Machine Learningのログを確認
+kubectl logs -n cloud-storage -l app=immich-machine-learning
+
+# Podの再起動
+kubectl rollout restart deployment/immich-machine-learning -n cloud-storage
+```
+
+**写真がアップロードできない:**
+
+```bash
+# Immich Serverのログを確認
+kubectl logs -n cloud-storage -l app=immich-server
+
+# MinIOへの接続を確認
+kubectl exec -n cloud-storage deployment/immich-server -- \
+  curl -v http://minio:9000
+```
+
+**データベース接続エラー:**
+
+```bash
+# PostgreSQLの状態確認
+kubectl logs -n cloud-storage -l app=immich-postgres
+
+# 接続テスト
+kubectl exec -n cloud-storage deployment/immich-server -- \
+  nc -zv immich-postgres 5432
 ```
 
 ### Cloudflare Tunnelの管理

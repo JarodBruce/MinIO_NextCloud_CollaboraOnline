@@ -83,6 +83,35 @@ else
 fi
 
 echo ""
+# Immichのチェック
+echo -e "${YELLOW}[Immich]${NC}"
+if kubectl get pod -n $NAMESPACE -l app=immich-server -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+    echo -e "${GREEN}✓ Immich Server is running${NC}"
+    IMMICH_POD=$(kubectl get pod -n $NAMESPACE -l app=immich-server -o jsonpath='{.items[0].metadata.name}')
+    echo "  Pod: $IMMICH_POD"
+else
+    echo -e "${RED}✗ Immich Server is not running${NC}"
+fi
+
+if kubectl get pod -n $NAMESPACE -l app=immich-machine-learning -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+    echo -e "${GREEN}✓ Immich ML is running${NC}"
+else
+    echo -e "${RED}✗ Immich ML is not running${NC}"
+fi
+
+if kubectl get pod -n $NAMESPACE -l app=immich-postgres -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+    echo -e "${GREEN}✓ Immich PostgreSQL is running${NC}"
+else
+    echo -e "${RED}✗ Immich PostgreSQL is not running${NC}"
+fi
+
+if kubectl get pod -n $NAMESPACE -l app=immich-redis -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
+    echo -e "${GREEN}✓ Immich Redis is running${NC}"
+else
+    echo -e "${RED}✗ Immich Redis is not running${NC}"
+fi
+
+echo ""
 # Nginx Proxy Managerのチェック
 echo -e "${YELLOW}[Nginx Proxy Manager]${NC}"
 if kubectl get pod -n $NAMESPACE -l app=nginx-proxy-manager -o jsonpath='{.items[0].status.phase}' 2>/dev/null | grep -q "Running"; then
@@ -128,6 +157,10 @@ Collabora Online:
   kubectl port-forward -n $NAMESPACE svc/collabora 9980:9980
   http://localhost:9980
 
+Immich:
+  kubectl port-forward -n $NAMESPACE svc/immich-server 3001:3001
+  http://localhost:3001
+
 Nginx Proxy Manager:
   kubectl port-forward -n $NAMESPACE svc/nginx-proxy-manager 8081:81
   http://localhost:8081
@@ -136,6 +169,7 @@ Nginx Proxy Manager:
   kubectl logs -n $NAMESPACE -l app=nextcloud -f
   kubectl logs -n $NAMESPACE -l app=minio -f
   kubectl logs -n $NAMESPACE -l app=collabora -f
+  kubectl logs -n $NAMESPACE -l app=immich-server -f
 EOF
 
 echo ""

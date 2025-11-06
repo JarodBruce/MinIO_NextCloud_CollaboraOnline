@@ -128,6 +128,7 @@ apply_manifests() {
         "02-minio.yaml"
         "03-nextcloud.yaml"
         "04-collabora.yaml"
+        "05-immich.yaml"
         "06-cloudflare-tunnel.yaml"
     )
     
@@ -155,6 +156,10 @@ wait_for_deployments() {
         "nextcloud-db"
         "nextcloud"
         "collabora"
+        "immich-postgres"
+        "immich-redis"
+        "immich-server"
+        "immich-machine-learning"
         "cloudflare-tunnel"
     )
     
@@ -212,16 +217,21 @@ show_status() {
    kubectl port-forward -n cloud-storage svc/collabora 9980:9980
    ブラウザ: http://localhost:9980
 
-4. Cloudflare Tunnelの状態確認:
+4. Immich:
+   kubectl port-forward -n cloud-storage svc/immich-server 3001:3001
+   ブラウザ: http://localhost:3001
+
+5. Cloudflare Tunnelの状態確認:
    kubectl logs -n cloud-storage -l app=cloudflare-tunnel
 
 ========================================
 次のステップ:
 ========================================
 
-1. MinIOでNextCloud用のバケット作成
+1. MinIOでバケット作成
    - MinIO Consoleにログイン
    - 'nextcloud' という名前のバケットを作成
+   - 'immich' という名前のバケットを作成
 
 2. Cloudflare Tunnelの設定
    - Cloudflareダッシュボードでトンネルを作成

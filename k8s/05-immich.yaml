@@ -1,0 +1,447 @@
+---
+# Immich PostgreSQL PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: immich-postgres-pvc
+  namespace: cloud-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: local-path
+
+---
+# Immich PostgreSQL Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: immich-postgres-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  POSTGRES_USER: "immich"
+  POSTGRES_PASSWORD: "immich123"
+  POSTGRES_DB: "immich"
+
+---
+# Immich MinIO Bucket Secret (S3互換設定)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: immich-s3-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "minioadmin"
+  AWS_SECRET_ACCESS_KEY: "minioadmin123"
+  S3_ENDPOINT: "http://minio:9000"
+  S3_BUCKET_NAME: "immich"
+  S3_REGION: "us-east-1"
+
+---
+# Immich Application Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: immich-secret
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  JWT_SECRET: "immich-jwt-secret-change-this-in-production"
+  DB_HOSTNAME: "immich-postgres"
+  DB_USERNAME: "immich"
+  DB_PASSWORD: "immich123"
+  DB_DATABASE_NAME: "immich"
+  REDIS_HOSTNAME: "immich-redis"
+
+---
+# PostgreSQL Deployment for Immich
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-postgres
+  namespace: cloud-storage
+  labels:
+    app: immich-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-postgres
+  template:
+    metadata:
+      labels:
+        app: immich-postgres
+    spec:
+      containers:
+      - name: postgres
+        image: tensorchord/pgvecto-rs:pg14-v0.2.0
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: immich-postgres-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: immich-postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: immich-postgres-secret
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        ports:
+        - containerPort: 5432
+          name: postgres
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - immich
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - immich
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: immich-postgres-pvc
+
+---
+# PostgreSQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-postgres
+  namespace: cloud-storage
+  labels:
+    app: immich-postgres
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+  selector:
+    app: immich-postgres
+
+---
+# Redis Deployment for Immich
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-redis
+  namespace: cloud-storage
+  labels:
+    app: immich-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-redis
+  template:
+    metadata:
+      labels:
+        app: immich-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.2-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 6379
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-redis
+  namespace: cloud-storage
+  labels:
+    app: immich-redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  selector:
+    app: immich-redis
+
+---
+# Immich Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-server
+  namespace: cloud-storage
+  labels:
+    app: immich-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-server
+  template:
+    metadata:
+      labels:
+        app: immich-server
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z immich-postgres 5432; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-redis
+        image: busybox:1.36
+        command: ['sh', '-c', 'until nc -z immich-redis 6379; do echo waiting for redis; sleep 2; done;']
+      - name: init-storage
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /data/upload /data/library /data/thumbs /data/profile /data/encoded-video /data/backups
+          touch /data/upload/.immich /data/library/.immich /data/thumbs/.immich /data/profile/.immich /data/encoded-video/.immich /data/backups/.immich
+          echo "Storage folders initialized"
+        volumeMounts:
+        - name: immich-data
+          mountPath: /data
+      containers:
+      - name: immich-server
+        image: ghcr.io/immich-app/immich-server:release
+        env:
+        - name: DB_HOSTNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_HOSTNAME
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_PASSWORD
+        - name: DB_DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_DATABASE_NAME
+        - name: REDIS_HOSTNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: REDIS_HOSTNAME
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: JWT_SECRET
+        # S3/MinIO設定
+        - name: IMMICH_STORAGE_S3_ENABLED
+          value: "true"
+        - name: IMMICH_STORAGE_S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: AWS_ACCESS_KEY_ID
+        - name: IMMICH_STORAGE_S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: AWS_SECRET_ACCESS_KEY
+        - name: IMMICH_STORAGE_S3_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: S3_ENDPOINT
+        - name: IMMICH_STORAGE_S3_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: S3_BUCKET_NAME
+        - name: IMMICH_STORAGE_S3_REGION
+          valueFrom:
+            secretKeyRef:
+              name: immich-s3-secret
+              key: S3_REGION
+        - name: IMMICH_STORAGE_S3_FORCE_PATH_STYLE
+          value: "true"
+        - name: IMMICH_PORT
+          value: "3001"
+        ports:
+        - containerPort: 3001
+          name: http
+        volumeMounts:
+        - name: immich-data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /api/server/ping
+            port: 3001
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/server/ping
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: immich-data
+        emptyDir: {}
+
+---
+# Immich Machine Learning Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: immich-machine-learning
+  namespace: cloud-storage
+  labels:
+    app: immich-machine-learning
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: immich-machine-learning
+  template:
+    metadata:
+      labels:
+        app: immich-machine-learning
+    spec:
+      containers:
+      - name: immich-machine-learning
+        image: ghcr.io/immich-app/immich-machine-learning:release
+        env:
+        - name: DB_HOSTNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_HOSTNAME
+        - name: DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_PASSWORD
+        - name: DB_DATABASE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: DB_DATABASE_NAME
+        - name: REDIS_HOSTNAME
+          valueFrom:
+            secretKeyRef:
+              name: immich-secret
+              key: REDIS_HOSTNAME
+        ports:
+        - containerPort: 3003
+          name: http
+        volumeMounts:
+        - name: model-cache
+          mountPath: /cache
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      volumes:
+      - name: model-cache
+        emptyDir: {}
+
+---
+# Immich Server Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-server
+  namespace: cloud-storage
+  labels:
+    app: immich-server
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3001
+    targetPort: 3001
+    name: http
+  selector:
+    app: immich-server
+
+---
+# Immich Machine Learning Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: immich-machine-learning
+  namespace: cloud-storage
+  labels:
+    app: immich-machine-learning
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3003
+    targetPort: 3003
+    name: http
+  selector:
+    app: immich-machine-learning

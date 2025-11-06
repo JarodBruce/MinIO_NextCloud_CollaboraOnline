@@ -11,11 +11,12 @@ show_menu() {
     echo "1) MinIO Console (port 9001)"
     echo "2) NextCloud (port 8080)"
     echo "3) Collabora Online (port 9980)"
-    echo "4) Nginx Proxy Manager (port 8081)"
-    echo "5) 全て起動"
-    echo "6) 終了"
+    echo "4) Immich (port 3001)"
+    echo "5) Nginx Proxy Manager (port 8081)"
+    echo "6) 全て起動"
+    echo "7) 終了"
     echo "========================================="
-    echo -n "選択してください [1-6]: "
+    echo -n "選択してください [1-7]: "
 }
 
 port_forward_minio() {
@@ -34,6 +35,12 @@ port_forward_collabora() {
     echo "Collabora Onlineへのポートフォワードを開始します..."
     echo "アクセス: http://localhost:9980"
     kubectl port-forward -n $NAMESPACE svc/collabora 9980:9980
+}
+
+port_forward_immich() {
+    echo "Immichへのポートフォワードを開始します..."
+    echo "アクセス: http://localhost:3001"
+    kubectl port-forward -n $NAMESPACE svc/immich-server 3001:3001
 }
 
 port_forward_npm() {
@@ -57,13 +64,17 @@ port_forward_all() {
     COLLAB_PID=$!
     echo "Collabora: http://localhost:9980 (PID: $COLLAB_PID)"
     
+    kubectl port-forward -n $NAMESPACE svc/immich-server 3001:3001 &
+    IMMICH_PID=$!
+    echo "Immich: http://localhost:3001 (PID: $IMMICH_PID)"
+    
     kubectl port-forward -n $NAMESPACE svc/nginx-proxy-manager 8081:81 &
     NPM_PID=$!
     echo "Nginx Proxy Manager: http://localhost:8081 (PID: $NPM_PID)"
     
     echo ""
     echo "全てのポートフォワードが開始されました。"
-    echo "停止するには: kill $MINIO_PID $NC_PID $COLLAB_PID $NPM_PID"
+    echo "停止するには: kill $MINIO_PID $NC_PID $COLLAB_PID $IMMICH_PID $NPM_PID"
     echo "または: pkill -f 'kubectl port-forward'"
     echo ""
     echo "Ctrl+C で終了します..."
@@ -88,12 +99,15 @@ while true; do
             port_forward_collabora
             ;;
         4)
-            port_forward_npm
+            port_forward_immich
             ;;
         5)
-            port_forward_all
+            port_forward_npm
             ;;
         6)
+            port_forward_all
+            ;;
+        7)
             echo "終了します"
             exit 0
             ;;
