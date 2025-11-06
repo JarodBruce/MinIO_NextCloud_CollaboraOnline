@@ -83,11 +83,12 @@ spec:
       # セキュリティコンテキストを追加
       securityContext:
         fsGroup: 101  # cool グループ
-        runAsNonRoot: true
-        runAsUser: 101  # cool ユーザー
+        runAsNonRoot: false  # coolforkit needs root to spawn child processes
       
       volumes:
       - name: cool-tmp
+        emptyDir: {}
+      - name: cool-child-roots
         emptyDir: {}
       - name: proof-key
         secret:
@@ -127,7 +128,9 @@ spec:
         
         volumeMounts:
         - name: cool-tmp
-          mountPath: /opt/cool
+          mountPath: /opt/cool/systemplate
+        - name: cool-child-roots
+          mountPath: /opt/cool/child-roots
         - name: proof-key
           mountPath: /etc/coolwsd/proof_key
           subPath: proof_key
@@ -163,14 +166,15 @@ spec:
         
         # securityContext を Pod レベルに移動し、コンテナレベルでは削除
         securityContext:
-          allowPrivilegeEscalation: false
+          allowPrivilegeEscalation: true
           readOnlyRootFilesystem: false
           capabilities:
             add:
             - MKNOD
             - SYS_CHROOT
-            drop:
-            - ALL
+            - FOWNER
+            - CHOWN
+            - SYS_ADMIN
 
 ---
 # Collabora Online Service
