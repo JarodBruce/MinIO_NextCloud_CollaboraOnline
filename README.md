@@ -352,6 +352,117 @@ Cloudflareダッシュボード → `SSL/TLS` で：
 2. Policy設定:
    - Include: `IP ranges` → `192.168.1.0/24` など
 
+### 6. Cloudflare Access認証の設定（推奨）
+
+Cloudflare Accessを使用すると、全てのサービスに対して統一された認証レイヤーを追加できます。
+
+#### Cloudflare Accessの有効化手順
+
+1. **Cloudflare Zero Trustダッシュボードにアクセス**
+   ```
+   https://one.dash.cloudflare.com/
+   ```
+
+2. **Access Applicationの作成**
+   
+   **NextCloud用:**
+   - `Access` → `Applications` → `Add an application`
+   - Application type: `Self-hosted`
+   - Application name: `NextCloud`
+   - Application domain: `nextcloud.yourdomain.com`
+   - Session duration: `24 hours`（お好みで調整）
+   
+   **ポリシー設定:**
+   - Policy name: `Allow authorized users`
+   - Action: `Allow`
+   - Include: 以下のいずれかを選択
+     - `Emails`: 特定のメールアドレス（例: admin@example.com）
+     - `Email domains`: ドメイン全体（例: @yourcompany.com）
+     - `Everyone`: 全員（推奨しません）
+     - `IP ranges`: 特定のIPアドレス範囲
+   - Session duration: `24 hours`
+
+   **Immich用:**
+   - Application name: `Immich`
+   - Application domain: `immich.yourdomain.com`
+   - 同様のポリシーを設定
+
+   **Collabora用:**
+   - Application name: `Collabora Online`
+   - Application domain: `collabora.yourdomain.com`
+   - 同様のポリシーを設定
+
+   **MinIO Console用:**
+   - Application name: `MinIO Console`
+   - Application domain: `minio.yourdomain.com`
+   - より厳格なポリシー（管理者のみ）を推奨
+
+3. **Cloudflare Access設定の確認**
+   
+   `k8s/07-cloudflare-access.yaml`を編集して、実際の設定値に更新：
+   
+   ```yaml
+   data:
+     CLOUDFLARE_ACCESS_TEAM_DOMAIN: "your-team.cloudflareaccess.com"
+     NEXTCLOUD_POLICY_AUD: "your-actual-nextcloud-aud-tag"
+     IMMICH_POLICY_AUD: "your-actual-immich-aud-tag"
+     COLLABORA_POLICY_AUD: "your-actual-collabora-aud-tag"
+   ```
+   
+   **Audience Tag (AUD)の取得方法:**
+   - Cloudflare Dashboard → Access → Applications
+   - 各アプリケーションをクリック → `Overview`タブ
+   - `Application Audience (AUD) Tag`をコピー
+
+4. **設定の適用**
+   
+   ```bash
+   kubectl apply -f k8s/07-cloudflare-access.yaml
+   ```
+
+5. **動作確認**
+   
+   - ブラウザで `https://nextcloud.yourdomain.com` にアクセス
+   - Cloudflare Accessのログイン画面が表示されます
+   - 設定したポリシーに従って認証（Email、OTP、SSO等）
+   - 認証成功後、NextCloudにリダイレクトされます
+
+#### Cloudflare Accessの利点
+
+✅ **統一された認証**: 全サービスで同じ認証フローを使用  
+✅ **多要素認証(MFA)**: Google Authenticatorなどと統合可能  
+✅ **SSO対応**: Google、Azure AD、Okta等と連携  
+✅ **詳細なログ**: アクセスログと監査証跡  
+✅ **デバイス認証**: 特定のデバイスからのみアクセス許可  
+✅ **地理的制限**: 特定の国からのアクセスをブロック
+
+#### トラブルシューティング
+
+**認証ループが発生する場合:**
+
+NextCloudの`config.php`に以下を追加：
+```bash
+kubectl exec -it -n cloud-storage deployment/nextcloud -- bash
+vi /var/www/html/config/config.php
+
+# 以下を追加
+'overwriteprotocol' => 'https',
+'overwrite.cli.url' => 'https://nextcloud.yourdomain.com',
+'trusted_proxies' => array(
+  '10.0.0.0/8',
+  '173.245.48.0/20',
+  '103.21.244.0/22',
+  // ... Cloudflare IPレンジ全て
+),
+```
+
+**Collaboraが動作しない場合:**
+
+Collaboraは通常、NextCloudを経由してアクセスするため、Cloudflare AccessのポリシーでNextCloudドメインを信頼する設定が必要です：
+
+- Collabora Applicationの設定で`Bypass`ポリシーを追加
+- Include: `IP ranges` → NextCloudのPod CIDR（例: `10.42.0.0/16`）
+
 ## ⚙️ 各サービスの設定
 
 ### NextCloudの初期設定
