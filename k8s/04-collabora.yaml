@@ -12,6 +12,56 @@ data:
   extra_params: "--o:ssl.enable=false --o:ssl.termination=true"
 
 ---
+# Collabora Proof Key Secret (generate with: ssh-keygen -t rsa -N "" -m PEM -f proof_key)
+# To create this secret, run:
+# kubectl create secret generic collabora-proof-key \
+#   --from-file=proof_key=./proof_key \
+#   --from-file=proof_key.pub=./proof_key.pub \
+#   -n cloud-storage
+apiVersion: v1
+kind: Secret
+metadata:
+  name: collabora-proof-key
+  namespace: cloud-storage
+type: Opaque
+stringData:
+  # デフォルトの空のproof_keyを提供（本番環境では実際の鍵を生成して使用してください）
+  proof_key: |
+    -----BEGIN RSA PRIVATE KEY-----
+    MIIEpAIBAAKCAQEAw8vHrhrHfYbFfCHMYPQYdFhTZQrVNTzLvCj3+9Wm0f3sxJYv
+    /6s1/+xR8YxPh6bYGQ5tK4wQb5YT0dXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLk
+    YdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXd
+    XZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYd
+    GF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZ
+    mVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF
+    7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmV
+    LkYdGF7nXdXZmQIDAQABAoIBAEw8j5YxqvJT5tGXZj8JT5tGXZj8JT5tGXZj8JT5
+    tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5t
+    GXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tG
+    XZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGX
+    Zj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZ
+    j8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj
+    8JT5tGXZkECgYEA8YxPh6bYGQ5tK4wQb5YT0dXZmVLkYdGF7nXdXZmVLkYdGF7nXd
+    XZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYd
+    GF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZ
+    mVLkYdGF7nXdXZkECgYEAzs1/+xR8YxPh6bYGQ5tK4wQb5YT0dXZmVLkYdGF7nXdX
+    ZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF
+    7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVLkYdGF7nXdXZmVL
+    kYdGF7nXdXZmQKBgQCvJT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8J
+    T5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5
+    tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tG
+    XZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JQKBgQCj5YxqvJT5tGXZj8JT5tGXZj8JT5
+    tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tG
+    XZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZ
+    j8JT5tGXZj8JT5tGXZj8JT5tGXZj8JQKBgQCw8j5YxqvJT5tGXZj8JT5tGXZj8JT5
+    tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tG
+    XZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZj8JT5tGXZ
+    j8JT5tGXZj8JT5tGXZj8JT5tGXZg==
+    -----END RSA PRIVATE KEY-----
+  proof_key.pub: |
+    ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDDy8euGsd9hsV8Icxg9Bh0WFNlCtU1PMu8KPf71abR/ezEli//qzX/7FHxjE+HptgZDm0rjBBvlhPR1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZUuRh0YXudd1dmZQ==
+
+---
 # Collabora Online Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -39,6 +89,10 @@ spec:
       volumes:
       - name: cool-tmp
         emptyDir: {}
+      - name: proof-key
+        secret:
+          secretName: collabora-proof-key
+          defaultMode: 0600
       
       containers:
       - name: collabora
@@ -74,6 +128,14 @@ spec:
         volumeMounts:
         - name: cool-tmp
           mountPath: /opt/cool
+        - name: proof-key
+          mountPath: /etc/coolwsd/proof_key
+          subPath: proof_key
+          readOnly: true
+        - name: proof-key
+          mountPath: /etc/coolwsd/proof_key.pub
+          subPath: proof_key.pub
+          readOnly: true
         
         resources:
           requests:
