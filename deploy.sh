@@ -134,6 +134,12 @@ apply_manifests() {
     for manifest in "${manifests[@]}"; do
         log_info "適用中: $manifest"
         kubectl apply -f "k8s/$manifest" || error_exit "$manifest の適用に失敗しました"
+        
+        # namespaceを作成した後にCloudflare Tunnel Secretを作成
+        if [[ "$manifest" == "00-namespace.yaml" ]]; then
+            check_cloudflare_token
+        fi
+        
         sleep 2
     done
     
@@ -252,10 +258,7 @@ main() {
         exit 0
     fi
     
-    # Cloudflare Tunnel設定確認と適用
-    check_cloudflare_token
-    
-    # マニフェスト適用
+    # マニフェスト適用（Cloudflare Tokenはnamespace作成後に適用される）
     apply_manifests
     
     # デプロイメント待機
