@@ -23,6 +23,11 @@ else
     exit 1
 fi
 
+# デフォルトドメイン設定
+NEXTCLOUD_DOMAIN="${NEXTCLOUD_DOMAIN:-nextcloud.example.com}"
+COLLABORA_DOMAIN="${COLLABORA_DOMAIN:-collabora.example.com}"
+IMMICH_DOMAIN="${IMMICH_DOMAIN:-immich.example.com}"
+
 # ロギング関数
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
@@ -121,6 +126,19 @@ check_cloudflare_token() {
 apply_manifests() {
     log_info "Kubernetesマニフェストを適用中..."
     
+    # 一時ディレクトリを作成
+    local temp_dir=$(mktemp -d)
+    
+    # エスケープされたドメイン（正規表現用）を作成
+    local nextcloud_domain_escaped=$(echo "$NEXTCLOUD_DOMAIN" | sed 's/\./\\\\./g')
+    local collabora_domain_escaped=$(echo "$COLLABORA_DOMAIN" | sed 's/\./\\\\./g')
+    local immich_domain_escaped=$(echo "$IMMICH_DOMAIN" | sed 's/\./\\\\./g')
+    
+    log_info "ドメイン設定:"
+    log_info "  NextCloud: $NEXTCLOUD_DOMAIN"
+    log_info "  Collabora: $COLLABORA_DOMAIN"
+    log_info "  Immich: $IMMICH_DOMAIN"
+    
     # 順番に適用
     local manifests=(
         "00-namespace.yaml"
@@ -134,7 +152,18 @@ apply_manifests() {
     
     for manifest in "${manifests[@]}"; do
         log_info "適用中: $manifest"
-        kubectl apply -f "k8s/$manifest" || error_exit "$manifest の適用に失敗しました"
+        
+        # ドメインを環境変数で置換
+        local temp_manifest="$temp_dir/$manifest"
+        sed -e "s/nextcloud\\.example\\.com/${NEXTCLOUD_DOMAIN}/g" \
+            -e "s/collabora\\.example\\.com/${COLLABORA_DOMAIN}/g" \
+            -e "s/immich\\.example\\.com/${IMMICH_DOMAIN}/g" \
+            -e "s/nextcloud\\\\\\.example\\\\\\.com/${nextcloud_domain_escaped}/g" \
+            -e "s/collabora\\\\\\.example\\\\\\.com/${collabora_domain_escaped}/g" \
+            -e "s/immich\\\\\\.example\\\\\\.com/${immich_domain_escaped}/g" \
+            "k8s/$manifest" > "$temp_manifest"
+        
+        kubectl apply -f "$temp_manifest" || error_exit "$manifest の適用に失敗しました"
         
         # namespaceを作成した後にCloudflare Tunnel Secretを作成
         if [[ "$manifest" == "00-namespace.yaml" ]]; then
@@ -143,6 +172,9 @@ apply_manifests() {
         
         sleep 2
     done
+    
+    # 一時ディレクトリを削除
+    rm -rf "$temp_dir"
     
     log_success "全てのマニフェストを適用しました"
 }

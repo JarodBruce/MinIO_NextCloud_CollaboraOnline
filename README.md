@@ -156,10 +156,10 @@ Cloudflareダッシュボードのトンネル設定で、以下のPublic Hostna
 
 | Public Hostname | Service | Type |
 |----------------|---------|------|
-| `nextcloud.yourdomain.com` | `http://nextcloud.cloud-storage.svc.cluster.local:80` | HTTP |
-| `collabora.yourdomain.com` | `http://collabora.cloud-storage.svc.cluster.local:9980` | HTTP |
-| `minio.yourdomain.com` | `http://minio.cloud-storage.svc.cluster.local:9001` | HTTP |
-| `immich.yourdomain.com` | `http://immich-server.cloud-storage.svc.cluster.local:3001` | HTTP |
+| `nextcloud.yourdomain.com` | `nextcloud.cloud-storage.svc.cluster.local:80` | HTTP |
+| `collabora.yourdomain.com` | `collabora.cloud-storage.svc.cluster.local:9980` | HTTP |
+| `minio.yourdomain.com` | `minio.cloud-storage.svc.cluster.local:9001` | HTTP |
+| `immich.yourdomain.com` | `immich-server.cloud-storage.svc.cluster.local:3001` | HTTP |
 
 **注意**: `yourdomain.com` を実際のドメインに置き換えてください。
 
@@ -192,6 +192,8 @@ chmod +x deploy.sh status.sh cleanup.sh port-forward.sh
 #### インターネット経由（Cloudflare Tunnel）
 
 - **NextCloud**: `https://nextcloud.yourdomain.com`
+  - ユーザー名: `admin`
+  - パスワード: `admin123`
   - 初回セットアップが自動実行されます
   - 管理者アカウントは自動作成されます
 

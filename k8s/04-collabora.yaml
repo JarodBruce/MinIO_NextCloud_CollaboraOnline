@@ -6,10 +6,10 @@ metadata:
   name: collabora-config
   namespace: cloud-storage
 data:
-  domain: "nextcloud\\.jarodbruce\\.f5\\.si|nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
+  domain: "nextcloud\\.example\\.com|nextcloud\\.cloud-storage\\.svc\\.cluster\\.local"
   username: "admin"
   password: "admin123"
-  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.host[0]=nextcloud.cloud-storage.svc.cluster.local --o:storage.wopi.host[1]=nextcloud.jarodbruce.f5.si --o:net.proxy_prefix=true --o:net.content_security_policy=default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'self' nextcloud.jarodbruce.f5.si https://nextcloud.jarodbruce.f5.si; form-action 'self'; base-uri 'self'; object-src 'none';"
+  extra_params: "--o:ssl.enable=false --o:ssl.termination=true --o:storage.wopi.host[0]=nextcloud.cloud-storage.svc.cluster.local --o:storage.wopi.host[1]=nextcloud.example.com --o:net.proxy_prefix=true --o:net.content_security_policy=default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; frame-ancestors 'self' nextcloud.example.com https://nextcloud.example.com; form-action 'self'; base-uri 'self'; object-src 'none';"
 
 ---
 # Collabora Proof Key Secret (generate with: ssh-keygen -t rsa -N "" -m PEM -f proof_key)
